@@ -37,8 +37,9 @@ def _make_project(tmp_path: Path) -> Path:
         '[services.sleeper]\n'
         f"cmd = '\"{py}\" sleeper.py'\n"
         '[services.web]\n'
-        f"cmd = '\"{py}\" sleeper.py'\n"
-        'url = "web"\n',
+        f"cmd = '\"{py}\" -m http.server ${{self.port}}'\n"
+        'url = "web"\n'
+        'depends_on = ["sleeper"]\n',
         encoding="utf-8",
     )
     _git(proj, "init", "-q")
@@ -97,6 +98,44 @@ def test_up_missing_config(tmp_path: Path) -> None:
     empty.mkdir()
     with pytest.raises(ipc.RpcError, match="config"):
         ipc.call("up", {"root": str(empty), "worktree": "x"})
+
+
+def test_unhealthy_aborts(tmp_path: Path) -> None:
+    daemon.start(timeout=20)
+    proj = tmp_path / "bad"
+    proj.mkdir()
+    (proj / "sleeper.py").write_text("import time\ntime.sleep(15)\n", encoding="utf-8")
+    py = sys.executable
+    (proj / "warren.toml").write_text(
+        '[project]\nname = "bad"\n'
+        '[services.web]\n'
+        f"cmd = '\"{py}\" sleeper.py'\n"  # never binds its port
+        'url = "web"\n'
+        'health = { tcp = "${self.port}", timeout = "1s" }\n',
+        encoding="utf-8",
+    )
+    _git(proj, "init", "-q")
+    _git(proj, "add", "-A")
+    _git(proj, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "i")
+    with pytest.raises(ipc.RpcError, match="healthy"):
+        ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=30)
+
+
+def test_dependency_cycle(tmp_path: Path) -> None:
+    daemon.start(timeout=20)
+    proj = tmp_path / "cyc"
+    proj.mkdir()
+    (proj / "warren.toml").write_text(
+        '[project]\nname = "cyc"\n'
+        '[services.a]\ncmd = "echo x"\ndepends_on = ["b"]\n'
+        '[services.b]\ncmd = "echo x"\ndepends_on = ["a"]\n',
+        encoding="utf-8",
+    )
+    _git(proj, "init", "-q")
+    _git(proj, "add", "-A")
+    _git(proj, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "i")
+    with pytest.raises(ipc.RpcError, match="cycle"):
+        ipc.call("up", {"root": str(proj), "worktree": "feat"})
 
 
 def test_up_requires_git(tmp_path: Path) -> None:

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from warren import allocator, git, paths, resolve
+from warren import allocator, git, health, paths, resolve
 from warren.config import ConfigError, load_config
 from warren.registry import Registry, WorktreeStatus
 from warren.rpc import RpcFault
@@ -24,6 +24,29 @@ def _load(root: str | None):
         return load_config(Path(root) / "warren.toml")
     except ConfigError as exc:
         raise RpcFault("config", str(exc)) from exc
+
+
+def _topo_order(services: dict) -> list[str]:
+    """Services in dependency order (a service after everything it depends on)."""
+    order: list[str] = []
+    done: set[str] = set()
+
+    def visit(name: str, stack: set[str]) -> None:
+        if name in done:
+            return
+        if name in stack:
+            raise RpcFault("cycle", f"dependency cycle involving '{name}'")
+        stack.add(name)
+        for dep in services[name].depends_on:
+            if dep in services:
+                visit(dep, stack)
+        stack.discard(name)
+        done.add(name)
+        order.append(name)
+
+    for name in services:
+        visit(name, set())
+    return order
 
 
 def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
@@ -61,16 +84,23 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
         ports.update(allocator.allocate(reg, wt.id, project, name, missing, rng))
 
     started = []
-    for sname, svc in cfg.services.items():
+    for sname in _topo_order(cfg.services):
+        svc = cfg.services[sname]
         if not svc.cmd:
             continue  # adapters (no cmd) are wired in Phase 7
+        cwd = str(Path(wt.path) / (svc.workdir or "."))
         pid = procman.start(
             wt.id,
             resolve.resolve_command(sname, svc, ports, name),
-            str(Path(wt.path) / (svc.workdir or ".")),
+            cwd,
             resolve.build_env(sname, svc, ports, name),
             paths.logs_dir() / project / name / f"{sname}.log",
         )
+        timeout = health.timeout_for(svc)
+        if not health.wait_healthy(sname, svc, ports, name, cwd, timeout):
+            procman.stop(wt.id)
+            reg.set_worktree_status(wt.id, WorktreeStatus.stopped)
+            raise RpcFault("unhealthy", f"'{sname}' did not become healthy within {timeout:g}s")
         started.append({"service": sname, "pid": pid, "port": resolve.primary_port(ports, sname)})
 
     reg.set_worktree_status(wt.id, WorktreeStatus.ready)
