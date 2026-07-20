@@ -11,7 +11,6 @@ Thin, typed data-access layer over stdlib ``sqlite3`` — no ORM.
 
 from __future__ import annotations
 
-import os
 import sqlite3
 import time
 from collections.abc import Iterator
@@ -19,6 +18,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+
+from warren import paths
 
 SCHEMA_VERSION = 1
 
@@ -103,9 +104,7 @@ CREATE TABLE IF NOT EXISTS slices (
 
 def default_db_path() -> Path:
     """``$WARREN_HOME/warren.db`` (default ``~/.warren/warren.db``)."""
-    home = os.environ.get("WARREN_HOME")
-    base = Path(home) if home else Path.home() / ".warren"
-    return base / "warren.db"
+    return paths.db_path()
 
 
 def _now() -> int:
