@@ -39,6 +39,19 @@ def _kill_tree(proc: subprocess.Popen) -> None:
         pass
 
 
+def kill_pid(pid: int) -> None:
+    """Kill a process and its group/tree by pid — best effort (used by reconcile)."""
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, check=False
+        )
+    else:
+        with contextlib.suppress(ProcessLookupError, OSError):
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        with contextlib.suppress(ProcessLookupError, OSError):
+            os.kill(pid, signal.SIGKILL)
+
+
 class ProcessManager:
     def __init__(self) -> None:
         self._procs: dict[int, list[tuple[subprocess.Popen, IO[bytes]]]] = {}

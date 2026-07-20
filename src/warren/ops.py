@@ -15,7 +15,7 @@ from warren import allocator, git, health, paths, resolve
 from warren.config import ConfigError, load_config
 from warren.registry import Registry, WorktreeStatus
 from warren.rpc import RpcFault
-from warren.supervisor import ProcessManager
+from warren.supervisor import ProcessManager, kill_pid
 
 
 def _load(root: str | None):
@@ -103,6 +103,7 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
                 resolve.build_env(sname, svc, ports, name),
                 paths.logs_dir() / project / name / f"{sname}.log",
             )
+            reg.add_process(wt.id, pid)
             timeout = health.timeout_for(svc)
             if not health.wait_healthy(sname, svc, ports, name, cwd, timeout):
                 raise RpcFault("unhealthy", f"'{sname}' did not become healthy within {timeout:g}s")
@@ -131,6 +132,29 @@ def _rollback(reg, procman, wt, root, created_worktree: bool) -> None:
             reg.delete_worktree(wt.id)
     else:
         with contextlib.suppress(Exception):
+            reg.clear_processes(wt.id)
+        with contextlib.suppress(Exception):
+            reg.set_worktree_status(wt.id, WorktreeStatus.stopped)
+
+
+def reconcile(reg: Registry) -> None:
+    """On daemon startup, converge the registry against reality (THESIS §8.4).
+
+    The daemon manages no processes yet, so any recorded PIDs are orphans from
+    before the restart — kill them. Then: half-created ``provisioning`` worktrees
+    are swept (C); ``ready`` worktrees (whose processes just died with the daemon)
+    drop to ``stopped``; ``stopped`` worktrees are left untouched (never GC'd).
+    """
+    for wt in reg.list_worktrees():
+        for pid in reg.processes_for(wt.id):
+            kill_pid(pid)
+        reg.clear_processes(wt.id)
+        if wt.status == WorktreeStatus.provisioning:
+            with contextlib.suppress(Exception):
+                reg.release_ports(wt.id)
+            with contextlib.suppress(Exception):
+                reg.delete_worktree(wt.id)
+        elif wt.status == WorktreeStatus.ready:
             reg.set_worktree_status(wt.id, WorktreeStatus.stopped)
 
 
@@ -143,6 +167,7 @@ def down(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     if wt is None:
         raise RpcFault("not_found", f"no worktree '{name}'")
     stopped = procman.stop(wt.id)
+    reg.clear_processes(wt.id)
     reg.set_worktree_status(wt.id, WorktreeStatus.stopped)  # down = pause; keeps ports
     return {"worktree": name, "stopped": stopped}
 

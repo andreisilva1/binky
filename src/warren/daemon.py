@@ -31,6 +31,7 @@ class Daemon:
         self._token = secrets.token_hex(16)
         self.registry = Registry.connect()
         self.procman = ProcessManager()
+        ops.reconcile(self.registry)  # clean up whatever a previous daemon left behind
         self.router = rpc.Router()
         self.router.add("ping", self._ping)
         self.router.add("shutdown", self._shutdown)

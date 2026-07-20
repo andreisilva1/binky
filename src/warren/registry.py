@@ -99,6 +99,12 @@ CREATE TABLE IF NOT EXISTS slices (
     updated_at  INTEGER NOT NULL,
     UNIQUE (worktree_id, service)
 );
+
+CREATE TABLE IF NOT EXISTS processes (
+    id          INTEGER PRIMARY KEY,
+    worktree_id INTEGER NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
+    pid         INTEGER NOT NULL
+);
 """
 
 
@@ -261,6 +267,21 @@ class Registry:
 
     def delete_slice(self, slice_id: int) -> None:
         self._conn.execute("DELETE FROM slices WHERE id=?", (slice_id,))
+
+    # -- processes (PIDs, for reconcile after a daemon restart) ------------ #
+    def add_process(self, worktree_id: int, pid: int) -> None:
+        self._conn.execute(
+            "INSERT INTO processes (worktree_id, pid) VALUES (?, ?)", (worktree_id, pid)
+        )
+
+    def processes_for(self, worktree_id: int) -> list[int]:
+        rows = self._conn.execute(
+            "SELECT pid FROM processes WHERE worktree_id=?", (worktree_id,)
+        ).fetchall()
+        return [r["pid"] for r in rows]
+
+    def clear_processes(self, worktree_id: int) -> None:
+        self._conn.execute("DELETE FROM processes WHERE worktree_id=?", (worktree_id,))
 
 
 def _worktree(row: sqlite3.Row) -> Worktree:
