@@ -69,6 +69,7 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             resolve.resolve_command(sname, svc, ports, name),
             str(Path(wt.path) / (svc.workdir or ".")),
             resolve.build_env(sname, svc, ports, name),
+            paths.logs_dir() / project / name / f"{sname}.log",
         )
         started.append({"service": sname, "pid": pid, "port": resolve.primary_port(ports, sname)})
 

@@ -29,3 +29,8 @@ def socket_path() -> Path:
 def worktrees_dir() -> Path:
     """Where per-project git worktrees live: ``$WARREN_HOME/worktrees``."""
     return warren_home() / "worktrees"
+
+
+def logs_dir() -> Path:
+    """Where per-service logs are captured: ``$WARREN_HOME/logs``."""
+    return warren_home() / "logs"

@@ -3,6 +3,7 @@
 import contextlib
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -25,7 +26,9 @@ def isolated_home(tmp_path, monkeypatch):
 def _make_project(tmp_path: Path) -> Path:
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "sleeper.py").write_text("import time\ntime.sleep(15)\n", encoding="utf-8")
+    (proj / "sleeper.py").write_text(
+        "import time\nprint('hello from warren', flush=True)\ntime.sleep(15)\n", encoding="utf-8"
+    )
     py = sys.executable
     # single-quoted TOML literal strings so Windows backslashes stay literal
     (proj / "warren.toml").write_text(
@@ -103,6 +106,21 @@ def test_up_requires_git(tmp_path: Path) -> None:
     (proj / "warren.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
     with pytest.raises(ipc.RpcError, match="not a git repository"):
         ipc.call("up", {"root": str(proj), "worktree": "feat"})
+
+
+def test_logs_captured(tmp_path: Path) -> None:
+    daemon.start(timeout=20)
+    proj = _make_project(tmp_path)
+    ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=60)
+    log = paths.logs_dir() / "demo" / "feat" / "sleeper.log"
+
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        if log.exists() and "hello from warren" in log.read_text(encoding="utf-8", errors="ignore"):
+            break
+        time.sleep(0.1)
+    assert log.exists()
+    assert "hello from warren" in log.read_text(encoding="utf-8", errors="ignore")
 
 
 def test_remove_clean(tmp_path: Path) -> None:

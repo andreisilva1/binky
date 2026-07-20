@@ -1,19 +1,22 @@
-"""In-daemon process supervision (Phase 3.2, hardened in 4.2).
+"""In-daemon process supervision (Phase 3.2, hardened in 4.2, logs in 5.1).
 
-Holds each worktree's running processes for the daemon's lifetime and stops them
-by killing the whole process *tree* — services run via a shell, so terminating
-just the shell would orphan the real process (and, on Windows, keep the worktree
-directory locked so `remove` couldn't delete it). Each service is started in its
-own process group / session; stop kills the group.
+Holds each worktree's running processes for the daemon's lifetime. Each service
+runs in its own process group / session with stdout+stderr captured to a log
+file, and is stopped by killing the whole process *tree* — services run via a
+shell, so terminating just the shell would orphan the real process (and, on
+Windows, keep the worktree directory locked so `remove` couldn't delete it).
 
-Health, restart, PID persistence and reconciliation still land in Phases 5-6.
+Health, restart, PID persistence and reconciliation still land in Phases 5.2-6.
 """
 
 from __future__ import annotations
 
+import contextlib
 import os
 import signal
 import subprocess
+from pathlib import Path
+from typing import IO
 
 
 def _new_group_kwargs() -> dict:
@@ -38,28 +41,41 @@ def _kill_tree(proc: subprocess.Popen) -> None:
 
 class ProcessManager:
     def __init__(self) -> None:
-        self._procs: dict[int, list[subprocess.Popen]] = {}
+        self._procs: dict[int, list[tuple[subprocess.Popen, IO[bytes]]]] = {}
 
     def is_running(self, worktree_id: int) -> bool:
-        return any(p.poll() is None for p in self._procs.get(worktree_id, []))
+        return any(p.poll() is None for p, _ in self._procs.get(worktree_id, []))
 
-    def start(self, worktree_id: int, command: str, cwd: str, env: dict[str, str]) -> int:
+    def start(
+        self, worktree_id: int, command: str, cwd: str, env: dict[str, str], log_file: Path
+    ) -> int:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        handle = open(log_file, "ab")  # noqa: SIM115 — closed in stop()
         proc = subprocess.Popen(
-            command, cwd=cwd, env={**os.environ, **env}, shell=True, **_new_group_kwargs()
+            command,
+            cwd=cwd,
+            env={**os.environ, **env},
+            shell=True,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            **_new_group_kwargs(),
         )
-        self._procs.setdefault(worktree_id, []).append(proc)
+        self._procs.setdefault(worktree_id, []).append((proc, handle))
         return proc.pid
 
     def stop(self, worktree_id: int) -> int:
-        procs = self._procs.pop(worktree_id, [])
-        alive = [p for p in procs if p.poll() is None]
-        for proc in alive:
+        entries = self._procs.pop(worktree_id, [])
+        alive = [(p, h) for p, h in entries if p.poll() is None]
+        for proc, _ in alive:
             _kill_tree(proc)
-        for proc in alive:
+        for proc, _ in alive:
             try:
                 proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
+        for _, handle in entries:
+            with contextlib.suppress(Exception):
+                handle.close()
         return len(alive)
 
     def stop_all(self) -> None:
