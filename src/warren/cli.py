@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
 from warren import __version__
+from warren.config import ConfigError, load_config
 
 app = typer.Typer(
     name="warren",
@@ -38,3 +41,23 @@ def main(
 def version() -> None:
     """Print the Warren version."""
     typer.echo(__version__)
+
+
+@app.command()
+def check(
+    path: Path = typer.Argument(
+        Path("warren.toml"),
+        help="Path to the warren.toml to validate.",
+    ),
+) -> None:
+    """Validate a warren.toml and report any problems."""
+    try:
+        cfg = load_config(path)
+    except ConfigError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    typer.secho(
+        f"✓ {path} is valid — project '{cfg.project.name}', "
+        f"{len(cfg.services)} service(s)",
+        fg=typer.colors.GREEN,
+    )
