@@ -123,7 +123,7 @@ def test_bad_port_range() -> None:
 
 
 def test_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match="no warren.toml"):
+    with pytest.raises(ConfigError, match=r"no warren\.toml"):
         load_config(tmp_path / "nope.toml")
 
 

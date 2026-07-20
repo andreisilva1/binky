@@ -1,6 +1,6 @@
 """Parse and validate ``warren.toml`` into typed models.
 
-The whole dream schema is modelled here (THESIS §8.2–§8.8 + the annotated
+The whole dream schema is modelled here (THESIS sections 8.2-8.8 + the annotated
 `warren.toml`). Fields that belong to v2 features (`sync`, `clone_from`,
 `agents`, `replicas`, …) are parsed and validated now so the file format is
 stable — even though the behaviour lands later. Unknown fields are rejected.
@@ -9,9 +9,8 @@ stable — even though the behaviour lands later. Unknown fields are rejected.
 from __future__ import annotations
 
 import tomllib
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Union
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
@@ -28,13 +27,13 @@ class _Base(BaseModel):
 # --------------------------------------------------------------------------- #
 #  enums
 # --------------------------------------------------------------------------- #
-class Restart(str, Enum):
+class Restart(StrEnum):
     on_failure = "on-failure"
     always = "always"
     never = "never"
 
 
-class SyncMode(str, Enum):
+class SyncMode(StrEnum):
     off = "off"
     notify = "notify"
     cdc = "cdc"
@@ -64,10 +63,10 @@ class HealthCheck(_Base):
         return self
 
 
-Health = Union[str, HealthCheck]
-PortSpec = Union[str, int]
-Ports = Union[list[str], dict[str, PortSpec]]
-UrlSpec = Union[bool, str, dict[str, str]]
+Health = str | HealthCheck
+PortSpec = str | int
+Ports = list[str] | dict[str, PortSpec]
+UrlSpec = bool | str | dict[str, str]
 
 
 # --------------------------------------------------------------------------- #
@@ -156,7 +155,7 @@ class WarrenConfig(_Base):
     project: Project
     defaults: Defaults = Defaults()
     services: dict[str, Service] = {}
-    groups: dict[str, Union[list[str], str]] = {}
+    groups: dict[str, list[str] | str] = {}
     agents: Agents | None = None
     hooks: Hooks | None = None
 

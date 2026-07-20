@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -25,14 +26,16 @@ def _version_callback(value: bool) -> None:
 
 @app.callback()
 def main(
-    _version: bool = typer.Option(
-        False,
-        "--version",
-        "-V",
-        help="Show the Warren version and exit.",
-        callback=_version_callback,
-        is_eager=True,
-    ),
+    _version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            "-V",
+            help="Show the Warren version and exit.",
+            callback=_version_callback,
+            is_eager=True,
+        ),
+    ] = False,
 ) -> None:
     """Warren — one repo, N agents, zero port collisions."""
 
@@ -45,10 +48,10 @@ def version() -> None:
 
 @app.command()
 def check(
-    path: Path = typer.Argument(
-        Path("warren.toml"),
-        help="Path to the warren.toml to validate.",
-    ),
+    path: Annotated[
+        Path,
+        typer.Argument(help="Path to the warren.toml to validate."),
+    ] = Path("warren.toml"),
 ) -> None:
     """Validate a warren.toml and report any problems."""
     try:
