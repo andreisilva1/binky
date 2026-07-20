@@ -19,23 +19,19 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Awaitable, Callable
 
-from warren import ipc, paths
-
-Handler = Callable[[dict], Awaitable[dict]]
+from warren import ipc, paths, rpc
 
 
 class Daemon:
     def __init__(self) -> None:
-        self._methods: dict[str, Handler] = {}
         self._stop = asyncio.Event()
         self._token = secrets.token_hex(16)
-        self.register("ping", self._ping)
-        self.register("shutdown", self._shutdown)
-
-    def register(self, name: str, handler: Handler) -> None:
-        self._methods[name] = handler
+        self.router = rpc.Router()
+        self.router.add("ping", self._ping)
+        self.router.add("shutdown", self._shutdown)
+        self.router.add("methods", self._list_methods)
+        self.router.add("version", self._version)
 
     async def _ping(self, _params: dict) -> dict:
         return {"pong": True, "pid": os.getpid()}
@@ -44,6 +40,14 @@ class Daemon:
         self._stop.set()
         return {"stopping": True}
 
+    async def _list_methods(self, _params: dict) -> dict:
+        return {"methods": self.router.names()}
+
+    async def _version(self, _params: dict) -> dict:
+        from warren import __version__
+
+        return {"version": __version__}
+
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
             line = await reader.readline()
@@ -51,24 +55,15 @@ class Daemon:
                 return
             req = json.loads(line.decode())
             if req.get("token") != self._token:
-                resp = {"ok": False, "error": "bad token"}
+                resp = {"ok": False, "error": {"code": "unauthorized", "message": "bad token"}}
             else:
-                resp = await self._dispatch(req.get("method"), req.get("params") or {})
+                resp = await self.router.dispatch(req.get("method"), req.get("params") or {})
             writer.write((json.dumps(resp) + "\n").encode())
             await writer.drain()
         except (json.JSONDecodeError, ConnectionError):
             pass
         finally:
             writer.close()
-
-    async def _dispatch(self, method: str | None, params: dict) -> dict:
-        handler = self._methods.get(method or "")
-        if handler is None:
-            return {"ok": False, "error": f"unknown method: {method}"}
-        try:
-            return {"ok": True, "result": await handler(params)}
-        except Exception as exc:  # surface any handler error back to the client
-            return {"ok": False, "error": str(exc)}
 
     async def serve(self) -> None:
         if ipc.USE_UNIX:

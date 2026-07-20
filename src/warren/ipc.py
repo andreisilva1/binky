@@ -23,7 +23,12 @@ class DaemonNotRunning(Exception):
 
 
 class RpcError(Exception):
-    """The daemon returned an error response."""
+    """The daemon returned a structured error response."""
+
+    def __init__(self, code: str, message: str) -> None:
+        super().__init__(f"{code}: {message}")
+        self.code = code
+        self.message = message
 
 
 @dataclass
@@ -76,7 +81,7 @@ def _recv_line(sock: socket.socket) -> dict:
             break
         buf += chunk
     if not buf:
-        raise RpcError("daemon closed the connection without responding")
+        raise RpcError("connection", "daemon closed the connection without responding")
     return json.loads(buf.decode())
 
 
@@ -99,5 +104,8 @@ def call(method: str, params: dict | None = None, *, timeout: float = 5.0) -> di
     finally:
         sock.close()
     if not resp.get("ok"):
-        raise RpcError(resp.get("error", "unknown error"))
+        err = resp.get("error")
+        if isinstance(err, dict):
+            raise RpcError(err.get("code", "error"), err.get("message", "unknown error"))
+        raise RpcError("error", str(err))
     return resp.get("result", {})

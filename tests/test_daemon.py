@@ -31,8 +31,13 @@ def test_start_ping_stop() -> None:
     assert result["pong"] is True
     assert isinstance(result["pid"], int)
 
-    with pytest.raises(ipc.RpcError, match="unknown method"):
+    with pytest.raises(ipc.RpcError, match="unknown method") as excinfo:
         ipc.call("does-not-exist")
+    assert excinfo.value.code == "unknown_method"
+
+    # introspection methods over the wire
+    assert set(ipc.call("methods")["methods"]) >= {"ping", "shutdown", "methods", "version"}
+    assert ipc.call("version")["version"]
 
     assert daemon.stop(timeout=10) is True
     assert daemon.is_running() is False
