@@ -99,6 +99,25 @@ def down(worktree: Annotated[str, typer.Argument(help="Worktree to stop.")]) -> 
 
 
 @app.command()
+def remove(
+    worktree: Annotated[str, typer.Argument(help="Worktree to destroy.")],
+    force: Annotated[
+        bool, typer.Option("--force", "-f", help="Discard uncommitted changes.")
+    ] = False,
+) -> None:
+    """Destroy a worktree — stop it, free its ports, and remove its files."""
+    if not _daemon.is_running():
+        typer.secho("daemon not running — nothing to remove", fg=typer.colors.YELLOW)
+        return
+    try:
+        ipc.call("remove", {"root": str(Path.cwd()), "worktree": worktree, "force": force})
+    except ipc.RpcError as exc:
+        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    typer.secho(f"✓ removed: {worktree}", fg=typer.colors.GREEN)
+
+
+@app.command()
 def status() -> None:
     """Show worktrees running on this machine."""
     if not _daemon.is_running():

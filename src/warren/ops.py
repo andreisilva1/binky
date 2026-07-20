@@ -89,6 +89,32 @@ def down(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     return {"worktree": name, "stopped": stopped}
 
 
+def remove(reg: Registry, procman: ProcessManager, params: dict) -> dict:
+    name = params.get("worktree")
+    if not name:
+        raise RpcFault("bad_request", "missing 'worktree'")
+    root = params.get("root")
+    cfg = _load(root)
+    wt = reg.get_worktree(cfg.project.name, name)
+    if wt is None:
+        raise RpcFault("not_found", f"no worktree '{name}'")
+
+    wt_path = Path(wt.path)
+    force = bool(params.get("force"))
+    if wt_path.exists() and git.is_dirty(wt_path) and not force:
+        raise RpcFault("dirty", f"'{name}' has uncommitted changes (use --force to discard)")
+
+    procman.stop(wt.id)
+    if wt_path.exists():
+        try:
+            git.remove_worktree(root, wt_path, force=True)
+        except git.GitError as exc:
+            raise RpcFault("git", str(exc)) from exc
+    reg.release_ports(wt.id)
+    reg.delete_worktree(wt.id)  # cascades to slices
+    return {"worktree": name, "removed": True}
+
+
 def status(reg: Registry, procman: ProcessManager, _params: dict) -> dict:
     worktrees = [
         {

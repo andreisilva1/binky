@@ -38,6 +38,7 @@ class Daemon:
         self.router.add("version", self._version)
         self.router.add("up", self._up)
         self.router.add("down", self._down)
+        self.router.add("remove", self._remove)
         self.router.add("status", self._status)
 
     async def _ping(self, _params: dict) -> dict:
@@ -60,6 +61,9 @@ class Daemon:
 
     async def _down(self, params: dict) -> dict:
         return ops.down(self.registry, self.procman, params)
+
+    async def _remove(self, params: dict) -> dict:
+        return ops.remove(self.registry, self.procman, params)
 
     async def _status(self, params: dict) -> dict:
         return ops.status(self.registry, self.procman, params)

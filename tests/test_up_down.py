@@ -94,3 +94,39 @@ def test_up_missing_config(tmp_path: Path) -> None:
     empty.mkdir()
     with pytest.raises(ipc.RpcError, match="config"):
         ipc.call("up", {"root": str(empty), "worktree": "x"})
+
+
+def test_up_requires_git(tmp_path: Path) -> None:
+    daemon.start(timeout=20)
+    proj = tmp_path / "nogit"
+    proj.mkdir()
+    (proj / "warren.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    with pytest.raises(ipc.RpcError, match="not a git repository"):
+        ipc.call("up", {"root": str(proj), "worktree": "feat"})
+
+
+def test_remove_clean(tmp_path: Path) -> None:
+    daemon.start(timeout=20)
+    proj = _make_project(tmp_path)
+    ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=60)
+    wt_dir = paths.worktrees_dir() / "demo" / "feat"
+    assert wt_dir.exists()
+
+    ipc.call("remove", {"root": str(proj), "worktree": "feat"})
+    assert not wt_dir.exists()
+    assert all(w["worktree"] != "feat" for w in ipc.call("status")["worktrees"])
+
+
+def test_remove_refuses_dirty_then_forces(tmp_path: Path) -> None:
+    daemon.start(timeout=20)
+    proj = _make_project(tmp_path)
+    ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=60)
+    wt_dir = paths.worktrees_dir() / "demo" / "feat"
+    (wt_dir / "scratch.txt").write_text("uncommitted", encoding="utf-8")
+
+    with pytest.raises(ipc.RpcError, match="uncommitted"):
+        ipc.call("remove", {"root": str(proj), "worktree": "feat"})
+    assert wt_dir.exists()
+
+    ipc.call("remove", {"root": str(proj), "worktree": "feat", "force": True})
+    assert not wt_dir.exists()
