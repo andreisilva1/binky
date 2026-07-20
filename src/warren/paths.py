@@ -24,3 +24,8 @@ def daemon_info_path() -> Path:
 def socket_path() -> Path:
     """Unix-domain socket path (Unix only; Windows uses a loopback TCP port)."""
     return warren_home() / "warren.sock"
+
+
+def worktrees_dir() -> Path:
+    """Where per-project git worktrees live: ``$WARREN_HOME/worktrees``."""
+    return warren_home() / "worktrees"

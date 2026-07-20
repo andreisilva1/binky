@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from warren import allocator, resolve
+from warren import allocator, git, paths, resolve
 from warren.config import ConfigError, load_config
 from warren.registry import Registry, WorktreeStatus
 from warren.rpc import RpcFault
@@ -33,8 +33,18 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     root = params.get("root")
     cfg = _load(root)
     project = cfg.project.name
+    if not root or not git.is_repo(root):
+        raise RpcFault("not_git", f"{root} is not a git repository (run `git init` first)")
 
-    wt = reg.get_worktree(project, name) or reg.create_worktree(project, name, str(root), name)
+    wt = reg.get_worktree(project, name)
+    if wt is None:
+        wt_path = paths.worktrees_dir() / project / name
+        if not wt_path.exists():
+            try:
+                git.add_worktree(root, wt_path, name)
+            except git.GitError as exc:
+                raise RpcFault("git", str(exc)) from exc
+        wt = reg.create_worktree(project, name, str(wt_path), name)
     if procman.is_running(wt.id):
         raise RpcFault("already_up", f"'{name}' is already up")
 
@@ -57,7 +67,7 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
         pid = procman.start(
             wt.id,
             resolve.resolve_command(sname, svc, ports, name),
-            str(Path(root) / (svc.workdir or ".")),
+            str(Path(wt.path) / (svc.workdir or ".")),
             resolve.build_env(sname, svc, ports, name),
         )
         started.append({"service": sname, "pid": pid, "port": resolve.primary_port(ports, sname)})

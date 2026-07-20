@@ -1,12 +1,17 @@
 """End-to-end: `up` spawns processes with allocated ports, `down` stops them."""
 
 import contextlib
+import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
-from warren import daemon, ipc
+from warren import daemon, ipc, paths
+
+
+def _git(cwd: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True, text=True)
 
 
 @pytest.fixture(autouse=True)
@@ -33,6 +38,9 @@ def _make_project(tmp_path: Path) -> Path:
         'url = "web"\n',
         encoding="utf-8",
     )
+    _git(proj, "init", "-q")
+    _git(proj, "add", "-A")
+    _git(proj, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "init")
     return proj
 
 
@@ -46,6 +54,11 @@ def test_up_status_down(tmp_path: Path) -> None:
     assert set(services) == {"sleeper", "web"}
     assert isinstance(services["web"]["port"], int)  # url → allocated a port
     assert services["sleeper"]["port"] is None  # no url/ports → no port
+
+    # a real git worktree was provisioned for the branch
+    wt_dir = paths.worktrees_dir() / "demo" / "feat"
+    assert wt_dir.exists()
+    assert (wt_dir / "warren.toml").exists()
 
     feat = next(w for w in ipc.call("status")["worktrees"] if w["worktree"] == "feat")
     assert feat["running"] is True
