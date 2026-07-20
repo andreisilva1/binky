@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "warren"
+description = "Give every git worktree its own isolated local world — ports, env, database, URLs — so a swarm of agents runs in parallel without collisions."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = ["worktree", "dev-environment", "agents", "isolation", "ports", "parallel"]
+dynamic = ["version"]
+dependencies = [
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8",
+  "ruff>=0.6",
+]
+
+[project.scripts]
+warren = "warren.cli:app"
+
+[tool.hatch.version]
+path = "src/warren/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/warren"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
