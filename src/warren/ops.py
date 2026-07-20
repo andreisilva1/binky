@@ -8,6 +8,7 @@ adapters in 7.
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 from warren import allocator, git, health, paths, resolve
@@ -60,6 +61,7 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
         raise RpcFault("not_git", f"{root} is not a git repository (run `git init` first)")
 
     wt = reg.get_worktree(project, name)
+    created_worktree = False
     if wt is None:
         wt_path = paths.worktrees_dir() / project / name
         if not wt_path.exists():
@@ -68,43 +70,68 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             except git.GitError as exc:
                 raise RpcFault("git", str(exc)) from exc
         wt = reg.create_worktree(project, name, str(wt_path), name)
+        created_worktree = True
     if procman.is_running(wt.id):
         raise RpcFault("already_up", f"'{name}' is already up")
 
-    # ports: reuse what's recorded, allocate anything missing
-    ports: dict[tuple[str, str], int] = {(p.service, p.label): p.port for p in reg.ports_for(wt.id)}
-    missing = [
-        req
-        for sname, svc in cfg.services.items()
-        for req in resolve.port_requests(sname, svc)
-        if req not in ports
-    ]
-    if missing:
-        rng = tuple(cfg.project.port_range) if cfg.project.port_range else None
-        ports.update(allocator.allocate(reg, wt.id, project, name, missing, rng))
+    # everything below is transactional: on any failure, undo what THIS up created
+    try:
+        # ports: reuse what's recorded, allocate anything missing
+        ports: dict[tuple[str, str], int] = {
+            (p.service, p.label): p.port for p in reg.ports_for(wt.id)
+        }
+        missing = [
+            req
+            for sname, svc in cfg.services.items()
+            for req in resolve.port_requests(sname, svc)
+            if req not in ports
+        ]
+        if missing:
+            rng = tuple(cfg.project.port_range) if cfg.project.port_range else None
+            ports.update(allocator.allocate(reg, wt.id, project, name, missing, rng))
 
-    started = []
-    for sname in _topo_order(cfg.services):
-        svc = cfg.services[sname]
-        if not svc.cmd:
-            continue  # adapters (no cmd) are wired in Phase 7
-        cwd = str(Path(wt.path) / (svc.workdir or "."))
-        pid = procman.start(
-            wt.id,
-            resolve.resolve_command(sname, svc, ports, name),
-            cwd,
-            resolve.build_env(sname, svc, ports, name),
-            paths.logs_dir() / project / name / f"{sname}.log",
-        )
-        timeout = health.timeout_for(svc)
-        if not health.wait_healthy(sname, svc, ports, name, cwd, timeout):
-            procman.stop(wt.id)
+        started = []
+        for sname in _topo_order(cfg.services):
+            svc = cfg.services[sname]
+            if not svc.cmd:
+                continue  # adapters (no cmd) are wired in Phase 7
+            cwd = str(Path(wt.path) / (svc.workdir or "."))
+            pid = procman.start(
+                wt.id,
+                resolve.resolve_command(sname, svc, ports, name),
+                cwd,
+                resolve.build_env(sname, svc, ports, name),
+                paths.logs_dir() / project / name / f"{sname}.log",
+            )
+            timeout = health.timeout_for(svc)
+            if not health.wait_healthy(sname, svc, ports, name, cwd, timeout):
+                raise RpcFault("unhealthy", f"'{sname}' did not become healthy within {timeout:g}s")
+            started.append(
+                {"service": sname, "pid": pid, "port": resolve.primary_port(ports, sname)}
+            )
+
+        reg.set_worktree_status(wt.id, WorktreeStatus.ready)
+        return {"project": project, "worktree": name, "services": started}
+    except Exception:
+        _rollback(reg, procman, wt, root, created_worktree)
+        raise
+
+
+def _rollback(reg, procman, wt, root, created_worktree: bool) -> None:
+    """Best-effort undo of a failed ``up`` (never touches a pre-existing worktree)."""
+    with contextlib.suppress(Exception):
+        procman.stop(wt.id)
+    if created_worktree:
+        with contextlib.suppress(Exception):
+            reg.release_ports(wt.id)
+        with contextlib.suppress(Exception):
+            if Path(wt.path).exists():
+                git.remove_worktree(root, wt.path, force=True)
+        with contextlib.suppress(Exception):
+            reg.delete_worktree(wt.id)
+    else:
+        with contextlib.suppress(Exception):
             reg.set_worktree_status(wt.id, WorktreeStatus.stopped)
-            raise RpcFault("unhealthy", f"'{sname}' did not become healthy within {timeout:g}s")
-        started.append({"service": sname, "pid": pid, "port": resolve.primary_port(ports, sname)})
-
-    reg.set_worktree_status(wt.id, WorktreeStatus.ready)
-    return {"project": project, "worktree": name, "services": started}
 
 
 def down(reg: Registry, procman: ProcessManager, params: dict) -> dict:

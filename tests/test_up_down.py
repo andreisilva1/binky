@@ -120,6 +120,10 @@ def test_unhealthy_aborts(tmp_path: Path) -> None:
     with pytest.raises(ipc.RpcError, match="healthy"):
         ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=30)
 
+    # transactional: the failed up left nothing behind
+    assert all(w["worktree"] != "feat" for w in ipc.call("status")["worktrees"])
+    assert not (paths.worktrees_dir() / "bad" / "feat").exists()
+
 
 def test_dependency_cycle(tmp_path: Path) -> None:
     daemon.start(timeout=20)
