@@ -67,6 +67,55 @@ def check(
     )
 
 
+@app.command()
+def up(worktree: Annotated[str, typer.Argument(help="Worktree/branch name to bring up.")]) -> None:
+    """Bring a worktree's isolated world online."""
+    _daemon.ensure()
+    try:
+        res = ipc.call("up", {"root": str(Path.cwd()), "worktree": worktree}, timeout=120)
+    except ipc.RpcError as exc:
+        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    for svc in res["services"]:
+        tail = f"  :{svc['port']}" if svc.get("port") else ""
+        typer.echo(f"  {svc['service']}  pid {svc['pid']}{tail}")
+    typer.secho(
+        f"✓ up: {res['worktree']} ({len(res['services'])} service(s))", fg=typer.colors.GREEN
+    )
+
+
+@app.command()
+def down(worktree: Annotated[str, typer.Argument(help="Worktree to stop.")]) -> None:
+    """Stop a worktree's processes (keeps its files and ports)."""
+    if not _daemon.is_running():
+        typer.secho("daemon not running — nothing to stop", fg=typer.colors.YELLOW)
+        return
+    try:
+        res = ipc.call("down", {"root": str(Path.cwd()), "worktree": worktree})
+    except ipc.RpcError as exc:
+        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    typer.secho(f"✓ down: {worktree} ({res['stopped']} stopped)", fg=typer.colors.GREEN)
+
+
+@app.command()
+def status() -> None:
+    """Show worktrees running on this machine."""
+    if not _daemon.is_running():
+        typer.secho("daemon not running", fg=typer.colors.YELLOW)
+        return
+    worktrees = ipc.call("status")["worktrees"]
+    if not worktrees:
+        typer.echo("no worktrees")
+        return
+    for wt in worktrees:
+        state = "running" if wt["running"] else wt["status"]
+        typer.echo(f"{wt['project']}/{wt['worktree']}  [{state}]")
+        for port in wt["ports"]:
+            label = f".{port['label']}" if port["label"] else ""
+            typer.echo(f"    {port['service']}{label}  :{port['port']}")
+
+
 daemon_app = typer.Typer(help="Manage the Warren daemon.", no_args_is_help=True)
 app.add_typer(daemon_app, name="daemon")
 
@@ -93,8 +142,8 @@ def stop() -> None:
         typer.secho("daemon was not running", fg=typer.colors.YELLOW)
 
 
-@daemon_app.command()
-def status() -> None:
+@daemon_app.command("status")
+def daemon_status() -> None:
     """Show whether the daemon is running."""
     if _daemon.is_running():
         info = ipc.read_daemon_info()

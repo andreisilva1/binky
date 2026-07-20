@@ -20,18 +20,25 @@ import subprocess
 import sys
 import time
 
-from warren import ipc, paths, rpc
+from warren import ipc, ops, paths, rpc
+from warren.registry import Registry
+from warren.supervisor import ProcessManager
 
 
 class Daemon:
     def __init__(self) -> None:
         self._stop = asyncio.Event()
         self._token = secrets.token_hex(16)
+        self.registry = Registry.connect()
+        self.procman = ProcessManager()
         self.router = rpc.Router()
         self.router.add("ping", self._ping)
         self.router.add("shutdown", self._shutdown)
         self.router.add("methods", self._list_methods)
         self.router.add("version", self._version)
+        self.router.add("up", self._up)
+        self.router.add("down", self._down)
+        self.router.add("status", self._status)
 
     async def _ping(self, _params: dict) -> dict:
         return {"pong": True, "pid": os.getpid()}
@@ -47,6 +54,15 @@ class Daemon:
         from warren import __version__
 
         return {"version": __version__}
+
+    async def _up(self, params: dict) -> dict:
+        return ops.up(self.registry, self.procman, params)
+
+    async def _down(self, params: dict) -> dict:
+        return ops.down(self.registry, self.procman, params)
+
+    async def _status(self, params: dict) -> dict:
+        return ops.status(self.registry, self.procman, params)
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
@@ -92,6 +108,8 @@ class Daemon:
             async with server:
                 await self._stop.wait()
         finally:
+            self.procman.stop_all()
+            self.registry.close()
             ipc.clear_daemon_info()
             if ipc.USE_UNIX:
                 _unlink(paths.socket_path())

@@ -30,6 +30,11 @@ def _primary(ports: PortMap, service: str) -> int | None:
     return next(iter(owned.values()), None)
 
 
+def primary_port(ports: PortMap, service: str) -> int | None:
+    """A service's primary port (label ``""``), else its first, else ``None``."""
+    return _primary(ports, service)
+
+
 def resolve(text: str, service: str, ports: PortMap, worktree: str) -> str:
     """Substitute ``${...}`` tokens in *text*. Unknown tokens are left untouched."""
 
