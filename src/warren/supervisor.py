@@ -13,16 +13,41 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import signal
 import subprocess
 from pathlib import Path
-from typing import IO
+from typing import IO, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from warren.config import Limits
+
+
+def _renice() -> None:  # child-side, Unix only
+    with contextlib.suppress(OSError):
+        os.nice(10)
 
 
 def _new_group_kwargs() -> dict:
     if os.name == "nt":
-        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-    return {"start_new_session": True}
+        return {
+            "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP
+            | subprocess.BELOW_NORMAL_PRIORITY_CLASS
+        }
+    return {"start_new_session": True, "preexec_fn": _renice}
+
+
+def _wrap_limits(command: str, limits: Limits | None) -> str:
+    """Opt-in hard limits on Linux via systemd-run cgroup scopes (no-op elsewhere)."""
+    if limits is None or os.name == "nt" or not shutil.which("systemd-run"):
+        return command
+    args = ["systemd-run", "--user", "--scope", "--quiet"]
+    if limits.memory:
+        args += ["-p", f"MemoryMax={limits.memory}"]
+    if limits.cpu:
+        with contextlib.suppress(ValueError):
+            args += ["-p", f"CPUQuota={int(float(limits.cpu) * 100)}%"]
+    return " ".join(args) + " " + command
 
 
 def _kill_tree(proc: subprocess.Popen) -> None:
@@ -60,8 +85,15 @@ class ProcessManager:
         return any(p.poll() is None for p, _ in self._procs.get(worktree_id, []))
 
     def start(
-        self, worktree_id: int, command: str, cwd: str, env: dict[str, str], log_file: Path
+        self,
+        worktree_id: int,
+        command: str,
+        cwd: str,
+        env: dict[str, str],
+        log_file: Path,
+        limits: Limits | None = None,
     ) -> int:
+        command = _wrap_limits(command, limits)
         log_file.parent.mkdir(parents=True, exist_ok=True)
         handle = open(log_file, "ab")  # noqa: SIM115 — closed in stop()
         proc = subprocess.Popen(

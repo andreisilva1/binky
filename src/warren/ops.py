@@ -156,6 +156,7 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
                 cwd,
                 resolve.build_env(sname, svc, ports, name, addresses),
                 paths.logs_dir() / project / name / f"{sname}.log",
+                svc.limits or cfg.defaults.limits,
             )
             reg.add_process(wt.id, pid)
             timeout = health.timeout_for(svc)
@@ -224,7 +225,7 @@ def down(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     stopped = procman.stop(wt.id)
     reg.clear_processes(wt.id)
     reg.set_worktree_status(wt.id, WorktreeStatus.stopped)  # down = pause; keeps ports
-    return {"worktree": name, "stopped": stopped}
+    return {"project": cfg.project.name, "worktree": name, "stopped": stopped}
 
 
 def remove(reg: Registry, procman: ProcessManager, params: dict) -> dict:
@@ -251,7 +252,7 @@ def remove(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             raise RpcFault("git", str(exc)) from exc
     reg.release_ports(wt.id)
     reg.delete_worktree(wt.id)  # cascades to slices
-    return {"worktree": name, "removed": True}
+    return {"project": cfg.project.name, "worktree": name, "removed": True}
 
 
 def status(reg: Registry, procman: ProcessManager, _params: dict) -> dict:

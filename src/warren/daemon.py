@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 
-from warren import ipc, ops, paths, rpc
+from warren import admission, ipc, ops, paths, rpc
 from warren.registry import Registry
 from warren.supervisor import ProcessManager
 
@@ -31,6 +31,8 @@ class Daemon:
         self._token = secrets.token_hex(16)
         self.registry = Registry.connect()
         self.procman = ProcessManager()
+        self.admission = admission.make_default()
+        self._slots: dict[tuple[str, str], int] = {}
         ops.reconcile(self.registry)  # clean up whatever a previous daemon left behind
         self.router = rpc.Router()
         self.router.add("ping", self._ping)
@@ -58,13 +60,39 @@ class Daemon:
         return {"version": __version__}
 
     async def _up(self, params: dict) -> dict:
-        return ops.up(self.registry, self.procman, params)
+        with contextlib.suppress(Exception):  # apply the project's max_parallel override
+            cfg = ops._load(params.get("root"))
+            if cfg.project.max_parallel:
+                self.admission.set_max_parallel(cfg.project.max_parallel)
+        token = await self.admission.acquire()  # FIFO — waits for capacity
+        try:
+            result = ops.up(self.registry, self.procman, params)
+        except BaseException:
+            self.admission.release(token)
+            raise
+        self._slots[(result["project"], result["worktree"])] = token
+        return result
 
     async def _down(self, params: dict) -> dict:
-        return ops.down(self.registry, self.procman, params)
+        result = ops.down(self.registry, self.procman, params)
+        self._release_slot(result["project"], result["worktree"])
+        return result
 
     async def _remove(self, params: dict) -> dict:
-        return ops.remove(self.registry, self.procman, params)
+        result = ops.remove(self.registry, self.procman, params)
+        self._release_slot(result["project"], result["worktree"])
+        return result
+
+    def _release_slot(self, project: str, worktree: str) -> None:
+        token = self._slots.pop((project, worktree), None)
+        if token is not None:
+            self.admission.release(token)
+
+    async def _pump_loop(self) -> None:
+        with contextlib.suppress(asyncio.CancelledError):
+            while not self._stop.is_set():
+                await asyncio.sleep(1.0)
+                self.admission.pump()
 
     async def _status(self, params: dict) -> dict:
         return ops.status(self.registry, self.procman, params)
@@ -108,11 +136,15 @@ class Daemon:
             with contextlib.suppress(NotImplementedError, ValueError):
                 loop.add_signal_handler(sig, self._stop.set)
 
+        pump_task = asyncio.create_task(self._pump_loop())
         ipc.write_daemon_info(info)
         try:
             async with server:
                 await self._stop.wait()
         finally:
+            pump_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await pump_task
             self.procman.stop_all()
             self.registry.close()
             ipc.clear_daemon_info()
