@@ -149,6 +149,15 @@ def status(
 
 
 @app.command()
+def dashboard() -> None:
+    """Open the live dashboard (TUI)."""
+    _daemon.ensure()
+    from warren.dashboard import run as run_dashboard
+
+    run_dashboard()
+
+
+@app.command()
 def logs(worktree: Annotated[str, typer.Argument(help="Worktree to show logs for.")]) -> None:
     """Print a worktree's captured service logs."""
     try:
