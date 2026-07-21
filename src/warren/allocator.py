@@ -1,4 +1,4 @@
-"""Port allocation (THESIS §8.1) — resolve-then-launch.
+"""Port allocation — resolve-then-launch.
 
 Ports are assigned *before* anything starts, by the single owner of the
 registry, so collisions are impossible by construction. Allocation is:

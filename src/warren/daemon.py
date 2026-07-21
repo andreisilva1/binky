@@ -1,4 +1,4 @@
-"""The always-alive Warren daemon (THESIS §8.4, §8.7).
+"""The always-alive Warren daemon.
 
 An asyncio server that owns the machine-global state and answers CLI requests.
 It is spawned lazily and detached, so it outlives the CLI process; it writes its

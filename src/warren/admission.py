@@ -1,11 +1,11 @@
-"""Admission control (THESIS §8.6, §8.7).
+"""Admission control.
 
 Bounds how many worktrees run at once so a swarm of agents doesn't melt the
 machine. A FIFO queue: an ``up`` waits its turn and is admitted only when there
 is capacity — fewer than ``max_parallel`` worktrees running **and** enough free
 RAM. ``max_parallel`` defaults from the machine's RAM (never a hardcoded
 constant) and is overridable per project. We key on memory, not CPU — death is
-by OOM (§8.7).
+by OOM.
 """
 
 from __future__ import annotations

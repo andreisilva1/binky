@@ -1,4 +1,4 @@
-"""Tests for Phase 11.1 config mechanics: groups, env_file, setup idempotency."""
+"""Tests for config mechanics: groups, env_file, setup idempotency."""
 
 import sys
 from pathlib import Path

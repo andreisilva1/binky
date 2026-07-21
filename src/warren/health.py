@@ -1,4 +1,4 @@
-"""Service health checks (THESIS §8.5).
+"""Service health checks.
 
 `depends_on` means "start me only after my dependencies are healthy". A health
 check is one of:

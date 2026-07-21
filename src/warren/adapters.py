@@ -1,4 +1,4 @@
-"""Resource adapters (THESIS §8.2) — the in-process draft of the contract.
+"""Resource adapters — the in-process draft of the contract.
 
 An adapter carves an isolated *slice* of a shared resource for a worktree and
 cleans it up, via three verbs over the slice (never the connection, never the
@@ -9,7 +9,7 @@ shared server):
 - ``teardown(slice)``  — destroy the slice (e.g. ``DROP DATABASE ... WITH (FORCE)``)
 
 This is the in-process prototype; it becomes the external JSON protocol + SDK
-once the shape is proven (THESIS §8.2). Postgres is the first adapter; the user
+once the shape is proven. Postgres is the first adapter; the user
 supplies their own server via ``admin_url`` — Warren never runs one.
 """
 

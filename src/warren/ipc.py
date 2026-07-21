@@ -1,4 +1,4 @@
-"""CLI <-> daemon transport (THESIS §8.8).
+"""CLI <-> daemon transport.
 
 One request/response per connection, newline-delimited JSON, with a shared-secret
 token. Transport is chosen by OS: a Unix-domain socket on posix, a loopback TCP

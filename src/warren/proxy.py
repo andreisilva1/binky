@@ -1,4 +1,4 @@
-"""Embedded HTTP reverse proxy (THESIS §8.6).
+"""Embedded HTTP reverse proxy.
 
 Routes ``<service>.<worktree>.<domain>`` to the worktree's port by reading the
 request's ``Host`` header, then relays raw bytes both ways — so WebSockets (HMR),

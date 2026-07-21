@@ -1,7 +1,7 @@
 """Parse and validate ``warren.toml`` into typed models.
 
-The whole dream schema is modelled here (THESIS sections 8.2-8.8 + the annotated
-`warren.toml`). Fields that belong to v2 features (`sync`, `clone_from`,
+The whole schema is modelled here (it matches the annotated `warren.toml`).
+Fields that belong to v2 features (`sync`, `clone_from`,
 `agents`, `replicas`, …) are parsed and validated now so the file format is
 stable — even though the behaviour lands later. Unknown fields are rejected.
 """

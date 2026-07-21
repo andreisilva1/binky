@@ -1,9 +1,9 @@
-"""The machine-global registry — the daemon's source of truth (THESIS §8.4, §8.6).
+"""The machine-global registry — the daemon's source of truth.
 
 SQLite at ``~/.warren/warren.db`` (WAL, foreign keys, busy-timeout). Holds the
 *desired state* the reconciler converges against: worktrees, their allocated
 ports, and their resource slices. Everything the daemon owns lives here — which
-is also what makes teardown ownership-safe (§8.4-B): teardown only touches rows
+is also what makes teardown ownership-safe: teardown only touches rows
 in this table.
 
 Thin, typed data-access layer over stdlib ``sqlite3`` — no ORM.

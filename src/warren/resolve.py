@@ -1,4 +1,4 @@
-"""Resolve ``${...}`` tokens and build each service's environment (THESIS §8.1).
+"""Resolve ``${...}`` tokens and build each service's environment.
 
 Every process boots already knowing the whole port map — its own ports and its
 dependencies' — so nobody discovers a port at runtime. Supported tokens:
@@ -7,8 +7,8 @@ dependencies' — so nobody discovers a port at runtime. Supported tokens:
 - ``${<svc>.port}`` / ``${<svc>.url}`` — another service's primary port / URL
 - ``${worktree}`` — the worktree name
 
-The URL form is ``http://localhost:<port>`` for now; the ``*.localhost`` proxy
-lands in Phase 9.
+The URL form is ``http://localhost:<port>``; the ``*.localhost`` proxy maps
+hostnames to ports.
 """
 
 from __future__ import annotations

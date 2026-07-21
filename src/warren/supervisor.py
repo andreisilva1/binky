@@ -1,4 +1,4 @@
-"""In-daemon process supervision (Phase 3.2, hardened in 4.2, logs in 5.1).
+"""In-daemon process supervision.
 
 Holds each worktree's running processes for the daemon's lifetime. Each service
 runs in its own process group / session with stdout+stderr captured to a log
@@ -6,7 +6,7 @@ file, and is stopped by killing the whole process *tree* — services run via a
 shell, so terminating just the shell would orphan the real process (and, on
 Windows, keep the worktree directory locked so `remove` couldn't delete it).
 
-Health, restart, PID persistence and reconciliation still land in Phases 5.2-6.
+Health checks and reconciliation live in ``health.py`` and ``ops.reconcile``.
 """
 
 from __future__ import annotations

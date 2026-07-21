@@ -1,8 +1,7 @@
 """Domain operations behind the daemon's RPC methods.
 
-``up`` / ``down`` / ``remove`` / ``status``. Git worktrees (Phase 4), health +
-transactional rollback (Phase 5), the startup reconciler (Phase 6) and resource
-adapters (Phase 7) are wired in; the reverse proxy is Phase 9.
+``up`` / ``down`` / ``remove`` / ``status`` — git worktrees, health + transactional
+rollback, the startup reconciler and resource adapters are all wired in here.
 """
 
 from __future__ import annotations
@@ -246,7 +245,7 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
         for sname in _topo_order(services):
             svc = services[sname]
             if not svc.cmd:
-                continue  # adapters (no cmd) are wired in Phase 7
+                continue  # adapters (no cmd) are provisioned separately, above
             cwd = str(Path(wt.path) / (svc.workdir or "."))
             env = {
                 **_load_env_files(svc.env_file, cwd),
@@ -304,7 +303,7 @@ def _rollback(reg, procman, cfg, wt, root, created_worktree: bool) -> None:
 
 
 def reconcile(reg: Registry) -> None:
-    """On daemon startup, converge the registry against reality (THESIS §8.4).
+    """On daemon startup, converge the registry against reality.
 
     The daemon manages no processes yet, so any recorded PIDs are orphans from
     before the restart — kill them. Then: half-created ``provisioning`` worktrees

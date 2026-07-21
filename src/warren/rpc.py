@@ -1,4 +1,4 @@
-"""The daemon's RPC method surface (THESIS §8.8).
+"""The daemon's RPC method surface.
 
 A tiny router: methods are ``async (params: dict) -> dict`` handlers, dispatched
 to a structured envelope — ``{"ok": true, "result": ...}`` or
