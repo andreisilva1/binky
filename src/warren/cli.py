@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+from itertools import groupby
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from warren import __version__, ipc
+from warren import __version__, ipc, paths
 from warren import daemon as _daemon
 from warren.config import ConfigError, load_config
 
@@ -118,21 +119,51 @@ def remove(
 
 
 @app.command()
-def status() -> None:
-    """Show worktrees running on this machine."""
+def status(
+    scope: Annotated[str, typer.Argument(help='"." to show only the current project')] = "",
+) -> None:
+    """Show worktrees on this machine, grouped by project (`status .` = current project)."""
     if not _daemon.is_running():
         typer.secho("daemon not running", fg=typer.colors.YELLOW)
         return
     worktrees = ipc.call("status")["worktrees"]
+    if scope == ".":
+        try:
+            current = load_config(Path.cwd() / "warren.toml").project.name
+        except ConfigError:
+            typer.secho("not inside a warren project", fg=typer.colors.YELLOW)
+            raise typer.Exit(code=1) from None
+        worktrees = [w for w in worktrees if w["project"] == current]
     if not worktrees:
         typer.echo("no worktrees")
         return
-    for wt in worktrees:
-        state = "running" if wt["running"] else wt["status"]
-        typer.echo(f"{wt['project']}/{wt['worktree']}  [{state}]")
-        for port in wt["ports"]:
-            label = f".{port['label']}" if port["label"] else ""
-            typer.echo(f"    {port['service']}{label}  :{port['port']}")
+    worktrees.sort(key=lambda w: (w["project"], w["worktree"]))
+    for project, group in groupby(worktrees, key=lambda w: w["project"]):
+        typer.secho(project, bold=True)
+        for wt in group:
+            state = "running" if wt["running"] else wt["status"]
+            typer.echo(f"  {wt['worktree']}  [{state}]")
+            for port in wt["ports"]:
+                label = f".{port['label']}" if port["label"] else ""
+                typer.echo(f"      {port['service']}{label}  :{port['port']}")
+
+
+@app.command()
+def logs(worktree: Annotated[str, typer.Argument(help="Worktree to show logs for.")]) -> None:
+    """Print a worktree's captured service logs."""
+    try:
+        project = load_config(Path.cwd() / "warren.toml").project.name
+    except ConfigError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    log_dir = paths.logs_dir() / project / worktree
+    files = sorted(log_dir.glob("*.log")) if log_dir.exists() else []
+    if not files:
+        typer.secho("no logs", fg=typer.colors.YELLOW)
+        return
+    for log in files:
+        typer.secho(f"── {log.stem} ──", fg=typer.colors.CYAN)
+        typer.echo(log.read_text(encoding="utf-8", errors="ignore").rstrip())
 
 
 daemon_app = typer.Typer(help="Manage the Warren daemon.", no_args_is_help=True)
