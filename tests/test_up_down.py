@@ -1,6 +1,8 @@
 """End-to-end: `up` spawns processes with allocated ports, `down` stops them."""
 
 import contextlib
+import http.client
+import socket
 import subprocess
 import sys
 import time
@@ -18,6 +20,7 @@ def _git(cwd: Path, *args: str) -> None:
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("WARREN_PROXY_PORT", "0")  # no proxy unless a test opts in
     yield
     with contextlib.suppress(Exception):
         daemon.stop(timeout=5)
@@ -164,6 +167,30 @@ def test_logs_captured(tmp_path: Path) -> None:
         time.sleep(0.1)
     assert log.exists()
     assert "hello from warren" in log.read_text(encoding="utf-8", errors="ignore")
+
+
+def test_proxy_routes_by_host(tmp_path: Path, monkeypatch) -> None:
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    proxy_port = probe.getsockname()[1]
+    probe.close()
+    monkeypatch.setenv("WARREN_PROXY_PORT", str(proxy_port))
+
+    daemon.start(timeout=20)
+    proj = _make_project(tmp_path)
+    ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=60)
+
+    # web.feat.demo.localhost → the worktree's http.server
+    conn = http.client.HTTPConnection("127.0.0.1", proxy_port, timeout=5)
+    conn.request("GET", "/", headers={"Host": "web.feat.demo.localhost"})
+    assert conn.getresponse().status == 200
+    conn.close()
+
+    # unknown host → 502
+    conn = http.client.HTTPConnection("127.0.0.1", proxy_port, timeout=5)
+    conn.request("GET", "/", headers={"Host": "ghost.feat.demo.localhost"})
+    assert conn.getresponse().status == 502
+    conn.close()
 
 
 def test_remove_clean(tmp_path: Path) -> None:

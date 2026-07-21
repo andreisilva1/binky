@@ -90,6 +90,34 @@ def _run_hook(command: str | None, kind: str, sname: str, wt, svc, address: str)
         raise RpcFault(kind, f"'{sname}' {kind} failed: {detail}")
 
 
+def _url_target(sname: str, svc) -> tuple[str | None, str]:
+    """The (subdomain, port-label) a service is exposed under, or (None, "")."""
+    url = svc.url
+    if not url:
+        return None, ""
+    if url is True:
+        return sname, ""
+    if isinstance(url, str):
+        return url, ""
+    for label, sub in url.items():  # dict form {label: subdomain}
+        return sub, label
+    return None, ""
+
+
+def _routes(cfg, worktree: str, ports: dict) -> dict[str, int]:
+    """Hostname -> port for every ``url`` service (``<sub>.<worktree>.<domain>``)."""
+    domain = cfg.project.domain or f"{cfg.project.name}.localhost"
+    out: dict[str, int] = {}
+    for sname, svc in cfg.services.items():
+        sub, label = _url_target(sname, svc)
+        if sub is None:
+            continue
+        port = ports.get((sname, label)) if label else resolve.primary_port(ports, sname)
+        if port:
+            out[f"{sub}.{worktree}.{domain}"] = port
+    return out
+
+
 def _teardown_slices(reg, cfg, wt) -> None:
     """Drop every adapter slice this worktree owns (best-effort)."""
     sl_name = adapters.slice_name(cfg.project.name, wt.name)
@@ -167,7 +195,12 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             )
 
         reg.set_worktree_status(wt.id, WorktreeStatus.ready)
-        return {"project": project, "worktree": name, "services": started}
+        return {
+            "project": project,
+            "worktree": name,
+            "services": started,
+            "routes": _routes(cfg, name, ports),
+        }
     except Exception:
         _rollback(reg, procman, cfg, wt, root, created_worktree)
         raise

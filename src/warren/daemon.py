@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 
-from warren import admission, ipc, ops, paths, rpc
+from warren import admission, ipc, ops, paths, proxy, rpc
 from warren.registry import Registry
 from warren.supervisor import ProcessManager
 
@@ -33,6 +33,9 @@ class Daemon:
         self.procman = ProcessManager()
         self.admission = admission.make_default()
         self._slots: dict[tuple[str, str], int] = {}
+        self.routes: dict[str, int] = {}
+        self._routes_by_wt: dict[tuple[str, str], dict[str, int]] = {}
+        self.proxy = proxy.Proxy(lambda host: self.routes.get(host))
         ops.reconcile(self.registry)  # clean up whatever a previous daemon left behind
         self.router = rpc.Router()
         self.router.add("ping", self._ping)
@@ -71,6 +74,8 @@ class Daemon:
             self.admission.release(token)
             raise
         self._slots[(result["project"], result["worktree"])] = token
+        self._routes_by_wt[(result["project"], result["worktree"])] = result.get("routes", {})
+        self._rebuild_routes()
         return result
 
     async def _down(self, params: dict) -> dict:
@@ -87,6 +92,13 @@ class Daemon:
         token = self._slots.pop((project, worktree), None)
         if token is not None:
             self.admission.release(token)
+        self._routes_by_wt.pop((project, worktree), None)
+        self._rebuild_routes()
+
+    def _rebuild_routes(self) -> None:
+        self.routes = {
+            host: port for routes in self._routes_by_wt.values() for host, port in routes.items()
+        }
 
     async def _pump_loop(self) -> None:
         with contextlib.suppress(asyncio.CancelledError):
@@ -136,12 +148,18 @@ class Daemon:
             with contextlib.suppress(NotImplementedError, ValueError):
                 loop.add_signal_handler(sig, self._stop.set)
 
+        proxy_port = int(os.environ.get("WARREN_PROXY_PORT", "80"))
+        if proxy_port > 0:
+            with contextlib.suppress(OSError):
+                await self.proxy.start(proxy_port)
         pump_task = asyncio.create_task(self._pump_loop())
         ipc.write_daemon_info(info)
         try:
             async with server:
                 await self._stop.wait()
         finally:
+            with contextlib.suppress(Exception):
+                await self.proxy.stop()
             pump_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await pump_task
