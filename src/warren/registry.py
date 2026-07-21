@@ -222,6 +222,12 @@ class Registry:
         ).fetchone()
         return _worktree(row) if row else None
 
+    def get_worktree_by_id(self, worktree_id: int) -> Worktree | None:
+        row = self._conn.execute(
+            "SELECT * FROM worktrees WHERE id=?", (worktree_id,)
+        ).fetchone()
+        return _worktree(row) if row else None
+
     def list_worktrees(self, project: str | None = None) -> list[Worktree]:
         if project is None:
             rows = self._conn.execute("SELECT * FROM worktrees ORDER BY project, name").fetchall()

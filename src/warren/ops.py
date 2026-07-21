@@ -189,6 +189,11 @@ def _run_setup(svc, sname: str, project: str, worktree: str, cwd: str, env: dict
     marker.write_text(digest, encoding="utf-8")
 
 
+def _health_check(sname: str, svc, ports: dict, worktree: str, cwd: str):
+    """A bound one-shot health probe for continuous supervision (no late-binding)."""
+    return lambda: health.check_once(sname, svc, ports, worktree, cwd)
+
+
 def _run_lifecycle_hook(command: str | None, wt_path: str, worktree: str) -> None:
     """Best-effort `post_up` / `pre_down` hook (runs in the worktree dir)."""
     if not command:
@@ -254,11 +259,14 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             _run_setup(svc, sname, project, name, cwd, env)
             pid = procman.start(
                 wt.id,
+                sname,
                 resolve.resolve_command(sname, svc, ports, name, addresses),
                 cwd,
                 env,
                 paths.logs_dir() / project / name / f"{sname}.log",
                 svc.limits or cfg.defaults.limits,
+                (svc.restart or cfg.defaults.restart).value,
+                _health_check(sname, svc, ports, name, cwd),
             )
             reg.add_process(wt.id, pid)
             timeout = health.timeout_for(svc)
@@ -375,6 +383,7 @@ def status(reg: Registry, procman: ProcessManager, _params: dict) -> dict:
             "worktree": wt.name,
             "status": wt.status,
             "running": procman.is_running(wt.id),
+            "health": procman.worktree_health(wt.id),
             "ports": [
                 {"service": p.service, "label": p.label, "port": p.port}
                 for p in reg.ports_for(wt.id)

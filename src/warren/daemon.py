@@ -21,8 +21,10 @@ import sys
 import time
 
 from warren import admission, ipc, ops, paths, proxy, rpc
-from warren.registry import Registry
-from warren.supervisor import ProcessManager
+from warren.registry import Registry, WorktreeStatus
+from warren.supervisor import ProcessManager, TickReport
+
+SUPERVISE_INTERVAL = 2.0  # seconds between live supervision ticks
 
 
 class Daemon:
@@ -117,6 +119,30 @@ class Daemon:
                 await asyncio.sleep(1.0)
                 self.admission.pump()
 
+    async def _supervise_loop(self) -> None:
+        """Live supervision: reap/restart children and reclaim worktrees that died."""
+        with contextlib.suppress(asyncio.CancelledError):
+            while not self._stop.is_set():
+                await asyncio.sleep(SUPERVISE_INTERVAL)
+                report = await asyncio.to_thread(self.procman.tick, time.monotonic())
+                self._apply_report(report)
+
+    def _apply_report(self, report: TickReport) -> None:
+        """Sync a supervision tick to the registry + admission/routes (on the loop)."""
+        for wt_id, pids in report.changed_pids.items():
+            with contextlib.suppress(Exception):
+                self.registry.clear_processes(wt_id)
+                for pid in pids:
+                    self.registry.add_process(wt_id, pid)
+        for wt_id in report.worktrees_down:
+            wt = None
+            with contextlib.suppress(Exception):
+                wt = self.registry.get_worktree_by_id(wt_id)
+                self.registry.clear_processes(wt_id)
+                self.registry.set_worktree_status(wt_id, WorktreeStatus.stopped)
+            if wt is not None:  # free the RAM slot + drop proxy routes
+                self._release_slot(wt.project, wt.name)
+
     async def _status(self, params: dict) -> dict:
         # read-only and thread-safe (connection-per-thread registry); no lock needed
         return await asyncio.to_thread(ops.status, self.registry, self.procman, params)
@@ -165,6 +191,7 @@ class Daemon:
             with contextlib.suppress(OSError):
                 await self.proxy.start(proxy_port)
         pump_task = asyncio.create_task(self._pump_loop())
+        supervise_task = asyncio.create_task(self._supervise_loop())
         ipc.write_daemon_info(info)
         try:
             async with server:
@@ -172,9 +199,10 @@ class Daemon:
         finally:
             with contextlib.suppress(Exception):
                 await self.proxy.stop()
-            pump_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await pump_task
+            for task in (pump_task, supervise_task):
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
             self.procman.stop_all()
             self.registry.close()
             ipc.clear_daemon_info()

@@ -130,6 +130,39 @@ def test_parallel_ups_distinct_worktrees(tmp_path: Path) -> None:
         assert statuses[n]["running"] is True
 
 
+def test_live_gc_after_service_exits(tmp_path: Path) -> None:
+    """A service that exits on its own is noticed live: the daemon's supervisor
+    reclaims the worktree (status → stopped) without a daemon restart."""
+    daemon.start(timeout=20)
+    proj = tmp_path / "shortlived"
+    proj.mkdir()
+    (proj / "run.py").write_text("import time\ntime.sleep(2)\n", encoding="utf-8")
+    py = sys.executable
+    (proj / "warren.toml").write_text(
+        '[project]\nname = "sl"\n'
+        '[services.job]\n'
+        f"cmd = '\"{py}\" run.py'\n"
+        'restart = "never"\n',  # exits 0, never restarts → gets reclaimed
+        encoding="utf-8",
+    )
+    _git(proj, "init", "-q")
+    _git(proj, "add", "-A")
+    _git(proj, "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q", "-m", "i")
+
+    ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=30)
+
+    deadline = time.monotonic() + 15
+    feat = None
+    while time.monotonic() < deadline:
+        feat = next(w for w in ipc.call("status")["worktrees"] if w["worktree"] == "feat")
+        if feat["status"] == "stopped" and not feat["running"]:
+            break
+        time.sleep(0.3)
+    assert feat is not None
+    assert feat["status"] == "stopped"  # supervised to a stop, live
+    assert feat["running"] is False
+
+
 def test_up_missing_config(tmp_path: Path) -> None:
     daemon.start(timeout=20)
     empty = tmp_path / "empty"

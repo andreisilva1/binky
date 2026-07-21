@@ -38,7 +38,10 @@ class Dashboard(App):
         with contextlib.suppress(Exception):
             worktrees = ipc.call("status")["worktrees"]
         for wt in worktrees:
-            state = "running" if wt["running"] else wt["status"]
+            if wt["running"]:
+                state = "unhealthy" if wt.get("health") == "unhealthy" else "running"
+            else:
+                state = wt["status"]
             services = ", ".join(f"{p['service']}:{p['port']}" for p in wt["ports"]) or "-"
             table.add_row(wt["project"], wt["worktree"], state, services)
 

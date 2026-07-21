@@ -148,7 +148,10 @@ def status(
     for project, group in groupby(worktrees, key=lambda w: w["project"]):
         typer.secho(project, bold=True)
         for wt in group:
-            state = "running" if wt["running"] else wt["status"]
+            if wt["running"]:
+                state = "unhealthy" if wt.get("health") == "unhealthy" else "running"
+            else:
+                state = wt["status"]
             typer.echo(f"  {wt['worktree']}  [{state}]")
             for port in wt["ports"]:
                 label = f".{port['label']}" if port["label"] else ""
