@@ -6,6 +6,7 @@ to an admin URL); the wiring is proven with an in-process fake adapter.
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 from typing import ClassVar
 
@@ -15,6 +16,8 @@ from warren import adapters, ops, resolve
 from warren.config import load_config_data
 from warren.registry import Registry
 from warren.supervisor import ProcessManager
+
+_FILESTORE = Path(__file__).resolve().parents[1] / "examples" / "adapters" / "filestore.py"
 
 
 class FakeAdapter(adapters.Adapter):
@@ -93,6 +96,54 @@ def test_env_token(monkeypatch) -> None:
 def test_unknown_adapter() -> None:
     with pytest.raises(adapters.AdapterError, match="unknown adapter"):
         adapters.get("nope", {})
+
+
+def test_in_process_capabilities() -> None:
+    assert FakeAdapter({}).capabilities() == {}
+
+    class Cloner(adapters.Adapter):
+        CAPABILITIES: ClassVar[dict] = {"clone": True}
+
+        def provision(self, slice_name: str) -> None: ...
+        def resolve(self, slice_name: str) -> str:
+            return ""
+        def teardown(self, slice_name: str) -> None: ...
+
+    assert Cloner({}).capabilities() == {"clone": True}
+
+
+def test_external_adapter_protocol_roundtrip(tmp_path) -> None:
+    """Drive the example external adapter over subprocess+JSON — proving the
+    protocol, the SDK's run(), and PATH-less discovery all work end-to-end."""
+    base = tmp_path / "store"
+    adapter = adapters.ExternalAdapter({"base": str(base)}, [sys.executable, str(_FILESTORE)])
+
+    assert adapter.capabilities() == {"clone": False}
+    adapter.provision("acme_feat")
+    assert (base / "acme_feat").is_dir()
+    assert adapter.resolve("acme_feat").startswith("file://")
+    adapter.provision("acme_feat")  # idempotent
+    adapter.teardown("acme_feat")
+    assert not (base / "acme_feat").exists()
+
+
+def test_get_discovers_external_on_path(monkeypatch, tmp_path) -> None:
+    fake_bin = tmp_path / "warren-adapter-thing"
+    fake_bin.write_text("", encoding="utf-8")
+    monkeypatch.setattr(
+        adapters.shutil, "which",
+        lambda name: str(fake_bin) if name == "warren-adapter-thing" else None,
+    )
+    adapter = adapters.get("thing", {})
+    assert isinstance(adapter, adapters.ExternalAdapter)
+
+
+def test_external_adapter_surfaces_failure() -> None:
+    bad = adapters.ExternalAdapter(
+        {}, [sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(1)"]
+    )
+    with pytest.raises(adapters.AdapterError, match="failed"):
+        bad.provision("x")
 
 
 PG_URL = os.environ.get("WARREN_TEST_PG")

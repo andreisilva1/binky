@@ -1,23 +1,34 @@
-"""Resource adapters — the in-process draft of the contract.
+"""Resource adapters — carve an isolated *slice* of a shared resource per worktree.
 
-An adapter carves an isolated *slice* of a shared resource for a worktree and
-cleans it up, via three verbs over the slice (never the connection, never the
-shared server):
+An adapter speaks three verbs over the slice (never the connection, never the
+shared server), plus a capability query:
 
 - ``provision(slice)`` — create the slice (e.g. ``CREATE DATABASE``)
 - ``resolve(slice)``   — return its address (the connection string) -> ``${db.url}``
 - ``teardown(slice)``  — destroy the slice (e.g. ``DROP DATABASE ... WITH (FORCE)``)
+- ``capabilities()``   — what the adapter supports (e.g. ``{"clone": true}``)
 
-This is the in-process prototype; it becomes the external JSON protocol + SDK
-once the shape is proven. Postgres is the first adapter; the user
-supplies their own server via ``admin_url`` — Warren never runs one.
+Two tiers implement the *same* contract:
+
+- **in-process** (this file) — first-party adapters shipped in the repo as Python
+  classes, discovered by name. Lowest friction to contribute; tested in CI.
+- **external** (:class:`ExternalAdapter`) — any-language executables the community
+  writes without patching Warren, driven over a one-shot subprocess + JSON protocol.
+  A Python author gets the protocol for free via ``warren.adapter_sdk``.
+
+Discovery: a service's ``adapter`` name is looked up in the in-process registry
+first; if absent, Warren looks for ``warren-adapter-<name>`` on ``PATH``.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
+import subprocess
 from abc import ABC, abstractmethod
+from typing import ClassVar
 from urllib.parse import urlparse, urlunparse
 
 
@@ -26,6 +37,9 @@ class AdapterError(Exception):
 
 
 class Adapter(ABC):
+    # what this adapter supports; consumed by features like snapshots (``clone``)
+    CAPABILITIES: ClassVar[dict] = {}
+
     def __init__(self, config: dict) -> None:
         self.config = config
 
@@ -38,7 +52,67 @@ class Adapter(ABC):
     @abstractmethod
     def teardown(self, slice_name: str) -> None: ...
 
+    def capabilities(self) -> dict:
+        return dict(self.CAPABILITIES)
 
+
+# --------------------------------------------------------------------------- #
+#  external tier — the JSON protocol
+# --------------------------------------------------------------------------- #
+# Warren invokes ``<binary> <op>`` (op ∈ provision|resolve|teardown|capabilities),
+# writes a JSON request on stdin, and reads a JSON response on stdout:
+#   request:  {"slice": "<slice>", "config": {...}}
+#   response: {"ok": true, ...}  |  {"ok": false, "error": "<msg>"}
+#             resolve adds "address"; capabilities adds "capabilities".
+class ExternalAdapter(Adapter):
+    """Drive an out-of-process adapter executable over the subprocess+JSON protocol."""
+
+    def __init__(self, config: dict, command: list[str]) -> None:
+        super().__init__(config)
+        self._command = command
+
+    def _call(self, op: str, slice_name: str | None = None) -> dict:
+        request: dict = {"config": self.config}
+        if slice_name is not None:
+            request["slice"] = slice_name
+        try:
+            proc = subprocess.run(
+                [*self._command, op],
+                input=json.dumps(request),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except OSError as exc:
+            raise AdapterError(f"could not run adapter {self._command}: {exc}") from exc
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout).strip()
+            raise AdapterError(f"adapter '{op}' failed: {detail}")
+        try:
+            resp = json.loads(proc.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            snippet = proc.stdout[:200]
+            raise AdapterError(f"adapter '{op}' returned invalid JSON: {snippet!r}") from exc
+        if not resp.get("ok"):
+            raise AdapterError(resp.get("error") or f"adapter '{op}' failed")
+        return resp
+
+    def provision(self, slice_name: str) -> None:
+        self._call("provision", slice_name)
+
+    def resolve(self, slice_name: str) -> str:
+        return self._call("resolve", slice_name)["address"]
+
+    def teardown(self, slice_name: str) -> None:
+        self._call("teardown", slice_name)
+
+    def capabilities(self) -> dict:
+        return self._call("capabilities").get("capabilities", {})
+
+
+# --------------------------------------------------------------------------- #
+#  registry + discovery
+# --------------------------------------------------------------------------- #
 _REGISTRY: dict[str, type[Adapter]] = {}
 
 
@@ -47,12 +121,19 @@ def register(name: str, cls: type[Adapter]) -> None:
 
 
 def get(spec: str, config: dict) -> Adapter:
-    """Instantiate the adapter for a spec like ``postgres@16`` (version ignored for now)."""
+    """Resolve an adapter spec like ``postgres@16`` to an instance (version ignored).
+
+    In-process first-party adapters win; otherwise an external
+    ``warren-adapter-<name>`` executable on PATH is driven over the JSON protocol.
+    """
     name = spec.split("@", 1)[0]
     cls = _REGISTRY.get(name)
-    if cls is None:
-        raise AdapterError(f"unknown adapter: {name}")
-    return cls(config)
+    if cls is not None:
+        return cls(config)
+    binary = shutil.which(f"warren-adapter-{name}")
+    if binary:
+        return ExternalAdapter(config, [binary])
+    raise AdapterError(f"unknown adapter: {name}")
 
 
 def slice_name(project: str, worktree: str) -> str:
@@ -60,6 +141,9 @@ def slice_name(project: str, worktree: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_]", "_", f"{project}_{worktree}").lower()
 
 
+# --------------------------------------------------------------------------- #
+#  in-process first-party adapters
+# --------------------------------------------------------------------------- #
 def _with_dbname(url: str, dbname: str) -> str:
     return urlunparse(urlparse(url)._replace(path=f"/{dbname}"))
 
