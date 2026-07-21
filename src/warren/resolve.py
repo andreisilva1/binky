@@ -13,12 +13,15 @@ lands in Phase 9.
 
 from __future__ import annotations
 
+import os
 import re
 
 from warren.config import Service
 
 # ports for the whole worktree graph: (service, label) -> port
 PortMap = dict[tuple[str, str], int]
+# adapter addresses: service -> connection string (for ${db.url})
+AddressMap = dict[str, str]
 
 _TOKEN = re.compile(r"\$\{([^}]+)\}")
 
@@ -35,8 +38,15 @@ def primary_port(ports: PortMap, service: str) -> int | None:
     return _primary(ports, service)
 
 
-def resolve(text: str, service: str, ports: PortMap, worktree: str) -> str:
+def resolve(
+    text: str,
+    service: str,
+    ports: PortMap,
+    worktree: str,
+    addresses: AddressMap | None = None,
+) -> str:
     """Substitute ``${...}`` tokens in *text*. Unknown tokens are left untouched."""
+    addr = addresses or {}
 
     def replace(match: re.Match[str]) -> str:
         expr = match.group(1)
@@ -45,8 +55,12 @@ def resolve(text: str, service: str, ports: PortMap, worktree: str) -> str:
         if "." not in expr:
             return match.group(0)
         obj, attr = expr.split(".", 1)
+        if obj == "env":
+            return os.environ.get(attr, match.group(0))
         target = service if obj == "self" else obj
         if attr == "url":
+            if target in addr:  # an adapter address (e.g. ${db.url})
+                return addr[target]
             port = _primary(ports, target)
             return f"http://localhost:{port}" if port is not None else match.group(0)
         # "port" = primary; anything else is a named port, e.g. ${self.grpc}
@@ -56,7 +70,13 @@ def resolve(text: str, service: str, ports: PortMap, worktree: str) -> str:
     return _TOKEN.sub(replace, text)
 
 
-def build_env(service_name: str, service: Service, ports: PortMap, worktree: str) -> dict[str, str]:
+def build_env(
+    service_name: str,
+    service: Service,
+    ports: PortMap,
+    worktree: str,
+    addresses: AddressMap | None = None,
+) -> dict[str, str]:
     """The environment injected into *service*'s processes."""
     env: dict[str, str] = {"WARREN_WORKTREE": worktree}
     primary = _primary(ports, service_name)
@@ -66,13 +86,19 @@ def build_env(service_name: str, service: Service, ports: PortMap, worktree: str
         if svc == service_name and label:
             env[f"PORT_{label.upper()}"] = str(port)
     for key, value in service.env.items():
-        env[key] = resolve(value, service_name, ports, worktree)
+        env[key] = resolve(value, service_name, ports, worktree, addresses)
     return env
 
 
-def resolve_command(service_name: str, service: Service, ports: PortMap, worktree: str) -> str:
+def resolve_command(
+    service_name: str,
+    service: Service,
+    ports: PortMap,
+    worktree: str,
+    addresses: AddressMap | None = None,
+) -> str:
     """The service's ``cmd`` with tokens resolved (e.g. ``--port ${self.port}``)."""
-    return resolve(service.cmd or "", service_name, ports, worktree)
+    return resolve(service.cmd or "", service_name, ports, worktree, addresses)
 
 
 def port_requests(service_name: str, service: Service) -> list[tuple[str, str]]:

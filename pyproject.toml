@@ -21,6 +21,9 @@ dev = [
   "pytest>=8",
   "ruff>=0.6",
 ]
+postgres = [
+  "psycopg[binary]>=3",
+]
 
 [project.scripts]
 warren = "warren.cli:app"

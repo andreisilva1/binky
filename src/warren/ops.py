@@ -1,17 +1,18 @@
-"""Domain operations behind the daemon's RPC methods (thin — Phase 3.2).
+"""Domain operations behind the daemon's RPC methods.
 
-``up`` / ``down`` / ``status``. Thin: no git worktree, adapters, or proxy yet —
-this proves the spine (config -> allocate -> resolve -> spawn -> registry). Git
-worktrees arrive in Phase 4, transactional orchestration + rollback in 5.3,
-adapters in 7.
+``up`` / ``down`` / ``remove`` / ``status``. Git worktrees (Phase 4), health +
+transactional rollback (Phase 5), the startup reconciler (Phase 6) and resource
+adapters (Phase 7) are wired in; the reverse proxy is Phase 9.
 """
 
 from __future__ import annotations
 
 import contextlib
+import os
+import subprocess
 from pathlib import Path
 
-from warren import allocator, git, health, paths, resolve
+from warren import adapters, allocator, git, health, paths, resolve
 from warren.config import ConfigError, load_config
 from warren.registry import Registry, WorktreeStatus
 from warren.rpc import RpcFault
@@ -48,6 +49,57 @@ def _topo_order(services: dict) -> list[str]:
     for name in services:
         visit(name, set())
     return order
+
+
+def _provision_adapters(reg, cfg, wt, project: str, name: str, ports: dict) -> dict[str, str]:
+    """Provision each adapter service's slice, run its migrate/seed, return addresses."""
+    addresses = {sl.service: sl.address for sl in reg.slices_for(wt.id) if sl.address}
+    sl_name = adapters.slice_name(project, name)
+    for sname, svc in cfg.services.items():
+        if not svc.adapter or sname in addresses:
+            continue
+        admin = resolve.resolve(svc.admin_url, sname, ports, name) if svc.admin_url else None
+        try:
+            adapter = adapters.get(svc.adapter, {"admin_url": admin})
+            adapter.provision(sl_name)
+            address = adapter.resolve(sl_name)
+        except adapters.AdapterError as exc:
+            raise RpcFault("adapter", str(exc)) from exc
+        slice_row = reg.create_slice(wt.id, sname, svc.adapter)
+        reg.set_slice_ready(slice_row.id, address)
+        addresses[sname] = address
+        _run_hook(svc.migrate, "migrate", sname, wt, svc, address)
+        _run_hook(svc.seed, "seed", sname, wt, svc, address)
+    return addresses
+
+
+def _run_hook(command: str | None, kind: str, sname: str, wt, svc, address: str) -> None:
+    if not command:
+        return
+    result = subprocess.run(
+        command,
+        cwd=str(Path(wt.path) / (svc.workdir or ".")),
+        shell=True,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "DATABASE_URL": address},
+        check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RpcFault(kind, f"'{sname}' {kind} failed: {detail}")
+
+
+def _teardown_slices(reg, cfg, wt) -> None:
+    """Drop every adapter slice this worktree owns (best-effort)."""
+    sl_name = adapters.slice_name(cfg.project.name, wt.name)
+    for sl in reg.slices_for(wt.id):
+        svc = cfg.services.get(sl.service)
+        if not svc or not svc.adapter:
+            continue
+        admin = resolve.resolve(svc.admin_url, sl.service, {}, wt.name) if svc.admin_url else None
+        with contextlib.suppress(Exception):
+            adapters.get(svc.adapter, {"admin_url": admin}).teardown(sl_name)
 
 
 def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
@@ -90,6 +142,8 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             rng = tuple(cfg.project.port_range) if cfg.project.port_range else None
             ports.update(allocator.allocate(reg, wt.id, project, name, missing, rng))
 
+        addresses = _provision_adapters(reg, cfg, wt, project, name, ports)
+
         started = []
         for sname in _topo_order(cfg.services):
             svc = cfg.services[sname]
@@ -98,9 +152,9 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             cwd = str(Path(wt.path) / (svc.workdir or "."))
             pid = procman.start(
                 wt.id,
-                resolve.resolve_command(sname, svc, ports, name),
+                resolve.resolve_command(sname, svc, ports, name, addresses),
                 cwd,
-                resolve.build_env(sname, svc, ports, name),
+                resolve.build_env(sname, svc, ports, name, addresses),
                 paths.logs_dir() / project / name / f"{sname}.log",
             )
             reg.add_process(wt.id, pid)
@@ -114,15 +168,16 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
         reg.set_worktree_status(wt.id, WorktreeStatus.ready)
         return {"project": project, "worktree": name, "services": started}
     except Exception:
-        _rollback(reg, procman, wt, root, created_worktree)
+        _rollback(reg, procman, cfg, wt, root, created_worktree)
         raise
 
 
-def _rollback(reg, procman, wt, root, created_worktree: bool) -> None:
+def _rollback(reg, procman, cfg, wt, root, created_worktree: bool) -> None:
     """Best-effort undo of a failed ``up`` (never touches a pre-existing worktree)."""
     with contextlib.suppress(Exception):
         procman.stop(wt.id)
     if created_worktree:
+        _teardown_slices(reg, cfg, wt)
         with contextlib.suppress(Exception):
             reg.release_ports(wt.id)
         with contextlib.suppress(Exception):
@@ -188,6 +243,7 @@ def remove(reg: Registry, procman: ProcessManager, params: dict) -> dict:
         raise RpcFault("dirty", f"'{name}' has uncommitted changes (use --force to discard)")
 
     procman.stop(wt.id)
+    _teardown_slices(reg, cfg, wt)
     if wt_path.exists():
         try:
             git.remove_worktree(root, wt_path, force=True)
