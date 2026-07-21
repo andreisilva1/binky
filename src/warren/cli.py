@@ -69,11 +69,18 @@ def check(
 
 
 @app.command()
-def up(worktree: Annotated[str, typer.Argument(help="Worktree/branch name to bring up.")]) -> None:
+def up(
+    worktree: Annotated[str, typer.Argument(help="Worktree/branch name to bring up.")],
+    group: Annotated[str, typer.Option("--group", "-g", help="Only start a service group.")] = "",
+) -> None:
     """Bring a worktree's isolated world online."""
     _daemon.ensure()
     try:
-        res = ipc.call("up", {"root": str(Path.cwd()), "worktree": worktree}, timeout=120)
+        res = ipc.call(
+            "up",
+            {"root": str(Path.cwd()), "worktree": worktree, "group": group or None},
+            timeout=120,
+        )
     except ipc.RpcError as exc:
         typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc

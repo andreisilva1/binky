@@ -8,6 +8,7 @@ adapters (Phase 7) are wired in; the reverse proxy is Phase 9.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -51,11 +52,13 @@ def _topo_order(services: dict) -> list[str]:
     return order
 
 
-def _provision_adapters(reg, cfg, wt, project: str, name: str, ports: dict) -> dict[str, str]:
+def _provision_adapters(
+    reg, cfg, wt, project: str, name: str, ports: dict, services: dict
+) -> dict[str, str]:
     """Provision each adapter service's slice, run its migrate/seed, return addresses."""
     addresses = {sl.service: sl.address for sl in reg.slices_for(wt.id) if sl.address}
     sl_name = adapters.slice_name(project, name)
-    for sname, svc in cfg.services.items():
+    for sname, svc in services.items():
         if not svc.adapter or sname in addresses:
             continue
         admin = resolve.resolve(svc.admin_url, sname, ports, name) if svc.admin_url else None
@@ -104,11 +107,11 @@ def _url_target(sname: str, svc) -> tuple[str | None, str]:
     return None, ""
 
 
-def _routes(cfg, worktree: str, ports: dict) -> dict[str, int]:
+def _routes(cfg, worktree: str, ports: dict, services: dict) -> dict[str, int]:
     """Hostname -> port for every ``url`` service (``<sub>.<worktree>.<domain>``)."""
     domain = cfg.project.domain or f"{cfg.project.name}.localhost"
     out: dict[str, int] = {}
-    for sname, svc in cfg.services.items():
+    for sname, svc in services.items():
         sub, label = _url_target(sname, svc)
         if sub is None:
             continue
@@ -130,6 +133,72 @@ def _teardown_slices(reg, cfg, wt) -> None:
             adapters.get(svc.adapter, {"admin_url": admin}).teardown(sl_name)
 
 
+def _select_services(cfg, group: str | None) -> dict:
+    """All services, or a group's members plus their transitive dependencies."""
+    if not group:
+        return dict(cfg.services)
+    members = cfg.groups.get(group)
+    if members is None:
+        raise RpcFault("unknown_group", f"no group '{group}'")
+    if members == "*":
+        return dict(cfg.services)
+    wanted: set[str] = set()
+
+    def add(n: str) -> None:
+        if n in wanted or n not in cfg.services:
+            return
+        wanted.add(n)
+        for dep in cfg.services[n].depends_on:
+            add(dep)
+
+    for member in members:
+        add(member)
+    return {n: s for n, s in cfg.services.items() if n in wanted}
+
+
+def _load_env_files(files: list[str], cwd: str) -> dict[str, str]:
+    env: dict[str, str] = {}
+    for rel in files:
+        path = Path(cwd) / rel
+        if not path.exists():
+            continue
+        for raw in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            env[key.strip()] = value.strip().strip('"').strip("'")
+    return env
+
+
+def _run_setup(svc, sname: str, project: str, worktree: str, cwd: str, env: dict) -> None:
+    """Run a service's `setup` once per worktree (re-run only if the command changed)."""
+    if not svc.setup:
+        return
+    marker = paths.warren_home() / "setup" / project / worktree / sname
+    digest = hashlib.sha256(svc.setup.encode()).hexdigest()
+    if marker.exists() and marker.read_text(encoding="utf-8").strip() == digest:
+        return
+    result = subprocess.run(
+        svc.setup, cwd=cwd, shell=True, env={**os.environ, **env},
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout).strip()
+        raise RpcFault("setup", f"'{sname}' setup failed: {detail}")
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(digest, encoding="utf-8")
+
+
+def _run_lifecycle_hook(command: str | None, wt_path: str, worktree: str) -> None:
+    """Best-effort `post_up` / `pre_down` hook (runs in the worktree dir)."""
+    if not command:
+        return
+    resolved = resolve.resolve(command, "", {}, worktree)
+    with contextlib.suppress(Exception):
+        subprocess.run(resolved, cwd=wt_path, shell=True, capture_output=True, check=False)
+
+
 def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     name = params.get("worktree")
     if not name:
@@ -139,6 +208,7 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     project = cfg.project.name
     if not root or not git.is_repo(root):
         raise RpcFault("not_git", f"{root} is not a git repository (run `git init` first)")
+    services = _select_services(cfg, params.get("group"))
 
     wt = reg.get_worktree(project, name)
     created_worktree = False
@@ -162,7 +232,7 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
         }
         missing = [
             req
-            for sname, svc in cfg.services.items()
+            for sname, svc in services.items()
             for req in resolve.port_requests(sname, svc)
             if req not in ports
         ]
@@ -170,19 +240,24 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             rng = tuple(cfg.project.port_range) if cfg.project.port_range else None
             ports.update(allocator.allocate(reg, wt.id, project, name, missing, rng))
 
-        addresses = _provision_adapters(reg, cfg, wt, project, name, ports)
+        addresses = _provision_adapters(reg, cfg, wt, project, name, ports, services)
 
         started = []
-        for sname in _topo_order(cfg.services):
-            svc = cfg.services[sname]
+        for sname in _topo_order(services):
+            svc = services[sname]
             if not svc.cmd:
                 continue  # adapters (no cmd) are wired in Phase 7
             cwd = str(Path(wt.path) / (svc.workdir or "."))
+            env = {
+                **_load_env_files(svc.env_file, cwd),
+                **resolve.build_env(sname, svc, ports, name, addresses),
+            }
+            _run_setup(svc, sname, project, name, cwd, env)
             pid = procman.start(
                 wt.id,
                 resolve.resolve_command(sname, svc, ports, name, addresses),
                 cwd,
-                resolve.build_env(sname, svc, ports, name, addresses),
+                env,
                 paths.logs_dir() / project / name / f"{sname}.log",
                 svc.limits or cfg.defaults.limits,
             )
@@ -195,11 +270,13 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             )
 
         reg.set_worktree_status(wt.id, WorktreeStatus.ready)
+        if cfg.hooks:
+            _run_lifecycle_hook(cfg.hooks.post_up, wt.path, name)
         return {
             "project": project,
             "worktree": name,
             "services": started,
-            "routes": _routes(cfg, name, ports),
+            "routes": _routes(cfg, name, ports, services),
         }
     except Exception:
         _rollback(reg, procman, cfg, wt, root, created_worktree)
@@ -255,6 +332,8 @@ def down(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     wt = reg.get_worktree(cfg.project.name, name)
     if wt is None:
         raise RpcFault("not_found", f"no worktree '{name}'")
+    if cfg.hooks:
+        _run_lifecycle_hook(cfg.hooks.pre_down, wt.path, name)
     stopped = procman.stop(wt.id)
     reg.clear_processes(wt.id)
     reg.set_worktree_status(wt.id, WorktreeStatus.stopped)  # down = pause; keeps ports
@@ -276,6 +355,8 @@ def remove(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     if wt_path.exists() and git.is_dirty(wt_path) and not force:
         raise RpcFault("dirty", f"'{name}' has uncommitted changes (use --force to discard)")
 
+    if cfg.hooks:
+        _run_lifecycle_hook(cfg.hooks.pre_down, wt.path, name)
     procman.stop(wt.id)
     _teardown_slices(reg, cfg, wt)
     if wt_path.exists():
