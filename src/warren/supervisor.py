@@ -16,6 +16,7 @@ import os
 import shutil
 import signal
 import subprocess
+import threading
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
@@ -78,11 +79,18 @@ def kill_pid(pid: int) -> None:
 
 
 class ProcessManager:
+    """Thread-safe: the daemon runs ``up``/``down`` on a worker pool, so several
+    threads touch this at once. A lock guards the ``_procs`` map; the slow parts
+    (kill + wait) run on local references *outside* the lock."""
+
     def __init__(self) -> None:
         self._procs: dict[int, list[tuple[subprocess.Popen, IO[bytes]]]] = {}
+        self._lock = threading.Lock()
 
     def is_running(self, worktree_id: int) -> bool:
-        return any(p.poll() is None for p, _ in self._procs.get(worktree_id, []))
+        with self._lock:
+            entries = list(self._procs.get(worktree_id, []))
+        return any(p.poll() is None for p, _ in entries)
 
     def start(
         self,
@@ -105,11 +113,13 @@ class ProcessManager:
             stderr=subprocess.STDOUT,
             **_new_group_kwargs(),
         )
-        self._procs.setdefault(worktree_id, []).append((proc, handle))
+        with self._lock:
+            self._procs.setdefault(worktree_id, []).append((proc, handle))
         return proc.pid
 
     def stop(self, worktree_id: int) -> int:
-        entries = self._procs.pop(worktree_id, [])
+        with self._lock:
+            entries = self._procs.pop(worktree_id, [])
         alive = [(p, h) for p, h in entries if p.poll() is None]
         for proc, _ in alive:
             _kill_tree(proc)
@@ -124,5 +134,7 @@ class ProcessManager:
         return len(alive)
 
     def stop_all(self) -> None:
-        for worktree_id in list(self._procs):
+        with self._lock:
+            ids = list(self._procs)
+        for worktree_id in ids:
             self.stop(worktree_id)

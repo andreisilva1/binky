@@ -4,8 +4,8 @@ An asyncio server that owns the machine-global state and answers CLI requests.
 It is spawned lazily and detached, so it outlives the CLI process; it writes its
 endpoint + token to ``daemon.json`` when ready and clears it on shutdown.
 
-This part (2.2) sets up the process, transport, and lifecycle with two built-in
-methods (``ping``, ``shutdown``). The real RPC surface lands in 2.3.
+It sets up the process, transport, and lifecycle and exposes the full RPC
+surface (``up``/``down``/``remove``/``status`` plus ``ping``/``shutdown``).
 """
 
 from __future__ import annotations
@@ -33,6 +33,7 @@ class Daemon:
         self.procman = ProcessManager()
         self.admission = admission.make_default()
         self._slots: dict[tuple[str, str], int] = {}
+        self._wt_locks: dict[tuple[str | None, str | None], asyncio.Lock] = {}
         self.routes: dict[str, int] = {}
         self._routes_by_wt: dict[tuple[str, str], dict[str, int]] = {}
         self.proxy = proxy.Proxy(lambda host: self.routes.get(host))
@@ -62,29 +63,39 @@ class Daemon:
 
         return {"version": __version__}
 
+    def _wt_lock(self, root: str | None, worktree: str | None) -> asyncio.Lock:
+        """One lock per worktree so two ops on the *same* worktree serialize while
+        different worktrees run in parallel. Keyed by (root, worktree), which maps
+        one-to-one to (project, worktree) since a root has a single project."""
+        return self._wt_locks.setdefault((root, worktree), asyncio.Lock())
+
     async def _up(self, params: dict) -> dict:
-        with contextlib.suppress(Exception):  # apply the project's max_parallel override
-            cfg = ops._load(params.get("root"))
-            if cfg.project.max_parallel:
-                self.admission.set_max_parallel(cfg.project.max_parallel)
-        token = await self.admission.acquire()  # FIFO — waits for capacity
-        try:
-            result = ops.up(self.registry, self.procman, params)
-        except BaseException:
-            self.admission.release(token)
-            raise
-        self._slots[(result["project"], result["worktree"])] = token
-        self._routes_by_wt[(result["project"], result["worktree"])] = result.get("routes", {})
-        self._rebuild_routes()
-        return result
+        async with self._wt_lock(params.get("root"), params.get("worktree")):
+            with contextlib.suppress(Exception):  # apply the project's max_parallel override
+                cfg = ops._load(params.get("root"))
+                if cfg.project.max_parallel:
+                    self.admission.set_max_parallel(cfg.project.max_parallel)
+            token = await self.admission.acquire()  # FIFO — waits for capacity
+            try:
+                # off the event loop: wait_healthy / migrate must not block other requests
+                result = await asyncio.to_thread(ops.up, self.registry, self.procman, params)
+            except BaseException:
+                self.admission.release(token)
+                raise
+            self._slots[(result["project"], result["worktree"])] = token
+            self._routes_by_wt[(result["project"], result["worktree"])] = result.get("routes", {})
+            self._rebuild_routes()
+            return result
 
     async def _down(self, params: dict) -> dict:
-        result = ops.down(self.registry, self.procman, params)
+        async with self._wt_lock(params.get("root"), params.get("worktree")):
+            result = await asyncio.to_thread(ops.down, self.registry, self.procman, params)
         self._release_slot(result["project"], result["worktree"])
         return result
 
     async def _remove(self, params: dict) -> dict:
-        result = ops.remove(self.registry, self.procman, params)
+        async with self._wt_lock(params.get("root"), params.get("worktree")):
+            result = await asyncio.to_thread(ops.remove, self.registry, self.procman, params)
         self._release_slot(result["project"], result["worktree"])
         return result
 
@@ -107,7 +118,8 @@ class Daemon:
                 self.admission.pump()
 
     async def _status(self, params: dict) -> dict:
-        return ops.status(self.registry, self.procman, params)
+        # read-only and thread-safe (connection-per-thread registry); no lock needed
+        return await asyncio.to_thread(ops.status, self.registry, self.procman, params)
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:

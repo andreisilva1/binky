@@ -8,11 +8,26 @@ or the human does; these helpers only manage worktrees.
 from __future__ import annotations
 
 import subprocess
+import threading
 from pathlib import Path
 
 
 class GitError(Exception):
     """A git command failed."""
+
+
+# Worktree add/remove mutate the main repo's index/refs, so concurrent `up`s on
+# the same repo would race on `.git/index.lock`. The daemon's per-worktree lock
+# doesn't cover this (different worktrees, one repo), so serialize the mutating
+# operations per repository — the slow parts of `up` (health, migrate) stay parallel.
+_repo_locks: dict[str, threading.Lock] = {}
+_repo_locks_guard = threading.Lock()
+
+
+def _repo_lock(root: str | Path) -> threading.Lock:
+    key = str(Path(root).resolve())
+    with _repo_locks_guard:
+        return _repo_locks.setdefault(key, threading.Lock())
 
 
 def _run(args: list[str], cwd: str | Path) -> str:
@@ -42,10 +57,11 @@ def branch_exists(root: str | Path, branch: str) -> bool:
 def add_worktree(root: str | Path, path: str | Path, branch: str) -> None:
     """Check *branch* out into a new worktree at *path* (creating the branch off HEAD if new)."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    if branch_exists(root, branch):
-        _run(["worktree", "add", str(path), branch], root)
-    else:
-        _run(["worktree", "add", "-b", branch, str(path)], root)
+    with _repo_lock(root):
+        if branch_exists(root, branch):
+            _run(["worktree", "add", str(path), branch], root)
+        else:
+            _run(["worktree", "add", "-b", branch, str(path)], root)
 
 
 def remove_worktree(root: str | Path, path: str | Path, *, force: bool = False) -> None:
@@ -53,7 +69,8 @@ def remove_worktree(root: str | Path, path: str | Path, *, force: bool = False) 
     if force:
         args.append("--force")
     args.append(str(path))
-    _run(args, root)
+    with _repo_lock(root):
+        _run(args, root)
 
 
 def is_dirty(path: str | Path) -> bool:

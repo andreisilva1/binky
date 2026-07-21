@@ -5,6 +5,7 @@ import http.client
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -93,6 +94,40 @@ def test_up_reuses_ports_after_down(tmp_path: Path) -> None:
     second = ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=60)
     web_port2 = next(s["port"] for s in second["services"] if s["service"] == "web")
     assert web_port2 == web_port  # ports are kept across down/up
+
+
+def test_parallel_ups_distinct_worktrees(tmp_path: Path) -> None:
+    """Several worktrees brought up at once (concurrent RPCs) all succeed, with
+    distinct ports and no git/index races — the core "fifteen at once" promise."""
+    daemon.start(timeout=20)
+    proj = _make_project(tmp_path)
+    names = ["a", "b", "c"]
+
+    results: dict[str, dict] = {}
+    errors: list[tuple[str, Exception]] = []
+
+    def worker(name: str) -> None:
+        try:
+            results[name] = ipc.call("up", {"root": str(proj), "worktree": name}, timeout=90)
+        except Exception as exc:
+            errors.append((name, exc))
+
+    threads = [threading.Thread(target=worker, args=(n,)) for n in names]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, errors
+    web_ports = [
+        next(s["port"] for s in results[n]["services"] if s["service"] == "web") for n in names
+    ]
+    assert len(set(web_ports)) == len(names)  # collision-free across parallel ups
+
+    statuses = {w["worktree"]: w for w in ipc.call("status")["worktrees"]}
+    for n in names:
+        assert statuses[n]["status"] == "ready"
+        assert statuses[n]["running"] is True
 
 
 def test_up_missing_config(tmp_path: Path) -> None:

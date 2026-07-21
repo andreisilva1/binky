@@ -12,9 +12,10 @@ Thin, typed data-access layer over stdlib ``sqlite3`` — no ORM.
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -118,33 +119,62 @@ def _now() -> int:
 
 
 class Registry:
-    """Typed access to the SQLite registry. Use :meth:`connect` to open."""
+    """Typed access to the SQLite registry. Use :meth:`connect` to open.
 
-    def __init__(self, conn: sqlite3.Connection) -> None:
-        self._conn = conn
+    Thread-safe by giving each thread its own connection to the shared WAL
+    database (concurrent reads; writes serialized by the engine). This is what
+    lets the daemon run ``up``/``down`` on a worker pool instead of funnelling
+    every request through one main-thread connection.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+        self._local = threading.local()
+        self._conns: list[sqlite3.Connection] = []
+        self._conns_lock = threading.Lock()
 
     # -- lifecycle -------------------------------------------------------- #
     @classmethod
     def connect(cls, path: str | Path | None = None) -> Registry:
         db_path = Path(path) if path is not None else default_db_path()
         db_path.parent.mkdir(parents=True, exist_ok=True)
+        reg = cls(db_path)
+        reg._ensure_schema()
+        return reg
+
+    def _open(self) -> sqlite3.Connection:
         # autocommit per statement; transaction() groups a set of ops atomically.
-        conn = sqlite3.connect(str(db_path), isolation_level=None)
+        # check_same_thread=False is safe here: connections are thread-local, so
+        # each is only *used* by its owner — only close() touches them cross-thread.
+        conn = sqlite3.connect(str(self._path), isolation_level=None, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=5000")
-        reg = cls(conn)
-        reg._ensure_schema()
-        return reg
+        with self._conns_lock:
+            self._conns.append(conn)
+        return conn
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        conn: sqlite3.Connection | None = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = self._open()
+            self._local.conn = conn
+        return conn
 
     def _ensure_schema(self) -> None:
         self._conn.executescript(_SCHEMA)
         self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     def close(self) -> None:
-        self._conn.close()
+        with self._conns_lock:
+            conns, self._conns = self._conns, []
+        for conn in conns:
+            with suppress(Exception):
+                conn.close()
+        self._local = threading.local()
 
     def __enter__(self) -> Registry:
         return self
@@ -154,8 +184,13 @@ class Registry:
 
     @contextmanager
     def transaction(self) -> Iterator[None]:
-        """Atomic unit of work: commit on success, roll back on error."""
-        self._conn.execute("BEGIN")
+        """Atomic unit of work: commit on success, roll back on error.
+
+        ``BEGIN IMMEDIATE`` takes the write lock up front, so concurrent writers
+        serialize (respecting ``busy_timeout``) rather than racing on the same
+        snapshot and deadlocking when both try to upgrade a shared lock.
+        """
+        self._conn.execute("BEGIN IMMEDIATE")
         try:
             yield
         except BaseException:
