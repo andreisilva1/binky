@@ -10,7 +10,7 @@ from typing import Annotated
 
 import typer
 
-from warren import __version__, ipc, paths
+from warren import __version__, init_cmd, ipc, paths
 from warren import daemon as _daemon
 from warren.config import ConfigError, load_config, security_warnings
 
@@ -48,6 +48,33 @@ def main(
 def version() -> None:
     """Print the Warren version."""
     typer.echo(__version__)
+
+
+@app.command()
+def init(
+    directory: Annotated[
+        Path, typer.Argument(help="Project directory to read (default: current).")
+    ] = Path("."),
+    force: Annotated[
+        bool, typer.Option("--force", help="Overwrite an existing warren.toml.")
+    ] = False,
+) -> None:
+    """Write a starting `warren.toml` from docker-compose.yml and .env."""
+    target = directory / "warren.toml"
+    if target.exists() and not force:
+        typer.secho(f"✗ {target} already exists — pass --force to overwrite", fg=typer.colors.RED)
+        raise typer.Exit(code=1)
+    try:
+        result = init_cmd.generate(directory)
+    except init_cmd.InitError as exc:
+        typer.secho(f"✗ {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    target.write_text(result.toml, encoding="utf-8")
+    typer.secho(f"✓ wrote {target}", fg=typer.colors.GREEN)
+    for note in result.notes:
+        typer.secho(f"  · {note}", fg=typer.colors.YELLOW)
+    typer.echo("Review it, then: warren check && warren up <worktree>")
 
 
 @app.command()

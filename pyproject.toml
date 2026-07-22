@@ -29,6 +29,11 @@ dependencies = [
   "pydantic>=2",
   "psutil>=5.9",
   "textual>=0.50",
+  # `warren init` reads docker-compose.yml. It is the first command a new user
+  # runs, so it cannot sit behind an extra — and compose files in the wild use
+  # anchors and flow collections that a hand-rolled subset parser would
+  # mis-read silently, which is the one failure mode a generator must not have.
+  "PyYAML>=6",
 ]
 
 [project.optional-dependencies]
