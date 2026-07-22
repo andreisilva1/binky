@@ -158,7 +158,9 @@ def remove(
 
 @app.command()
 def verify(worktree: Annotated[str, typer.Argument(help="Worktree to verify.")]) -> None:
-    """Run the project's `[agents] verify` checks against a worktree (exit ≠ 0 on failure)."""
+    # Square brackets are Rich markup in Typer's help renderer and get eaten, so the
+    # TOML section is named without them here.
+    """Run the project's agents.verify checks against a worktree (exit non-zero on failure)."""
     if not _daemon.is_running():
         typer.secho("daemon not running", fg=typer.colors.YELLOW)
         raise typer.Exit(code=1)
@@ -185,7 +187,7 @@ def env(
         bool, typer.Option("--dotenv", help="Print KEY=value lines instead of JSON.")
     ] = False,
 ) -> None:
-    """Print a worktree's exposed coordinates (`[agents] expose`) as JSON or dotenv."""
+    """Print a worktree's exposed coordinates (agents.expose) as JSON or dotenv."""
     if not _daemon.is_running():
         typer.secho("daemon not running", fg=typer.colors.YELLOW)
         raise typer.Exit(code=1)

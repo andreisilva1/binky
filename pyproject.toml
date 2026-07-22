@@ -24,6 +24,12 @@ classifiers = [
   "Topic :: Software Development :: Build Tools",
 ]
 dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/andreisilva1/warren"
+Repository = "https://github.com/andreisilva1/warren"
+Changelog = "https://github.com/andreisilva1/warren/blob/main/CHANGELOG.md"
+Issues = "https://github.com/andreisilva1/warren/issues"
 dependencies = [
   "typer>=0.12",
   "pydantic>=2",
