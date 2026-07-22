@@ -46,6 +46,7 @@ class Worktree:
     status: str
     created_at: int
     updated_at: int
+    verify_status: str | None = None  # None → never verified; else "passing"/"failing"
 
 
 @dataclass(frozen=True)
@@ -77,6 +78,7 @@ CREATE TABLE IF NOT EXISTS worktrees (
     status     TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
+    verify_status TEXT,
     UNIQUE (project, name)
 );
 
@@ -243,6 +245,12 @@ class Registry:
             (status.value, _now(), worktree_id),
         )
 
+    def set_verify_status(self, worktree_id: int, verify_status: str) -> None:
+        self._conn.execute(
+            "UPDATE worktrees SET verify_status=?, updated_at=? WHERE id=?",
+            (verify_status, _now(), worktree_id),
+        )
+
     def delete_worktree(self, worktree_id: int) -> None:
         # cascades to ports + slices
         self._conn.execute("DELETE FROM worktrees WHERE id=?", (worktree_id,))
@@ -328,7 +336,7 @@ class Registry:
 def _worktree(row: sqlite3.Row) -> Worktree:
     return Worktree(
         row["id"], row["project"], row["name"], row["path"], row["branch"],
-        row["status"], row["created_at"], row["updated_at"],
+        row["status"], row["created_at"], row["updated_at"], row["verify_status"],
     )
 
 

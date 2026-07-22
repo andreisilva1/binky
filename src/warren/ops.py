@@ -171,6 +171,94 @@ def _routes(cfg, worktree: str, ports: dict, services: dict) -> dict[str, int]:
     return out
 
 
+def _exposed(cfg, wt, ports: dict, addresses: dict) -> dict[str, str]:
+    """The curated live coordinates handed to agents (``[agents] expose``).
+
+    Empty unless a service is listed; a resource yields its address (``${db.url}``),
+    a url service its ``<scheme>://<sub>.<worktree>.<domain>`` route.
+    """
+    expose = cfg.agents.expose if cfg.agents else []
+    if not expose:
+        return {}
+    scheme = "https" if cfg.project.https else "http"
+    domain = cfg.project.domain or f"{cfg.project.name}.localhost"
+    out: dict[str, str] = {}
+    for name in expose:
+        svc = cfg.services.get(name)
+        if svc is None:
+            continue
+        if svc.adapter:
+            if name in addresses:
+                out[name] = addresses[name]
+            continue
+        sub, label = _url_target(name, svc)
+        if sub is not None:
+            out[name] = f"{scheme}://{sub}.{wt.name}.{domain}"
+        else:
+            port = ports.get((name, label)) if label else resolve.primary_port(ports, name)
+            if port:
+                out[name] = f"http://localhost:{port}"
+    return out
+
+
+def _worktree_coordinates(reg, cfg, wt) -> dict[str, str]:
+    ports = {(p.service, p.label): p.port for p in reg.ports_for(wt.id)}
+    addresses = {sl.service: sl.address for sl in reg.slices_for(wt.id) if sl.address}
+    return _exposed(cfg, wt, ports, addresses)
+
+
+def env(reg: Registry, params: dict) -> dict:
+    """The worktree's exposed coordinates, for an agent/orchestrator to consume."""
+    name = params.get("worktree")
+    if not name:
+        raise RpcFault("bad_request", "missing 'worktree'")
+    cfg = _load(params.get("root"))
+    wt = reg.get_worktree(cfg.project.name, name)
+    if wt is None:
+        raise RpcFault("not_found", f"no worktree '{name}'")
+    coords = _worktree_coordinates(reg, cfg, wt)
+    return {"project": cfg.project.name, "worktree": name, "env": coords}
+
+
+def verify(reg: Registry, procman: ProcessManager, params: dict) -> dict:
+    """Run ``[agents] verify`` against the live worktree and record the verdict.
+
+    Warren is the substrate, so it doesn't decide *when* work is done — a driver
+    calls this at its done moment. It runs the checks against the exposed env and
+    persists ``passing``/``failing`` as worktree state; the exit verdict is the gate.
+    """
+    name = params.get("worktree")
+    if not name:
+        raise RpcFault("bad_request", "missing 'worktree'")
+    cfg = _load(params.get("root"))
+    wt = reg.get_worktree(cfg.project.name, name)
+    if wt is None:
+        raise RpcFault("not_found", f"no worktree '{name}'")
+    checks = cfg.agents.verify if cfg.agents else []
+    if not checks:
+        raise RpcFault("no_verify", "no [agents] verify commands defined")
+
+    exposed = _worktree_coordinates(reg, cfg, wt)
+    check_env = {**os.environ, **{f"{n.upper()}_URL": v for n, v in exposed.items()}}
+    results = []
+    passed_all = True
+    for command in checks:
+        proc = subprocess.run(
+            command, cwd=wt.path, shell=True, capture_output=True, text=True,
+            env=check_env, check=False,
+        )
+        ok = proc.returncode == 0
+        passed_all = passed_all and ok
+        output = (proc.stdout + proc.stderr).strip()[-2000:]
+        results.append({"command": command, "passed": ok, "output": output})
+    verdict = "passing" if passed_all else "failing"
+    reg.set_verify_status(wt.id, verdict)
+    return {
+        "project": cfg.project.name, "worktree": name,
+        "verify": verdict, "passed": passed_all, "checks": results,
+    }
+
+
 def _teardown_slices(reg, cfg, wt) -> None:
     """Drop every adapter slice this worktree owns (best-effort)."""
     sl_name = adapters.slice_name(cfg.project.name, wt.name)
@@ -435,6 +523,7 @@ def status(reg: Registry, procman: ProcessManager, _params: dict) -> dict:
             "status": wt.status,
             "running": procman.is_running(wt.id),
             "health": procman.worktree_health(wt.id),
+            "verify": wt.verify_status,
             "ports": [
                 {"service": p.service, "label": p.label, "port": p.port}
                 for p in reg.ports_for(wt.id)

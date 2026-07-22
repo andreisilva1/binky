@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from itertools import groupby
 from pathlib import Path
 from typing import Annotated
@@ -126,6 +127,52 @@ def remove(
 
 
 @app.command()
+def verify(worktree: Annotated[str, typer.Argument(help="Worktree to verify.")]) -> None:
+    """Run the project's `[agents] verify` checks against a worktree (exit ≠ 0 on failure)."""
+    if not _daemon.is_running():
+        typer.secho("daemon not running", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    try:
+        res = ipc.call("verify", {"root": str(Path.cwd()), "worktree": worktree}, timeout=600)
+    except ipc.RpcError as exc:
+        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    for check in res["checks"]:
+        mark = "✓" if check["passed"] else "✗"
+        color = typer.colors.GREEN if check["passed"] else typer.colors.RED
+        typer.secho(f"  {mark} {check['command']}", fg=color)
+    if res["passed"]:
+        typer.secho(f"✓ verify: {worktree} passing", fg=typer.colors.GREEN)
+    else:
+        typer.secho(f"✗ verify: {worktree} failing", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+
+@app.command()
+def env(
+    worktree: Annotated[str, typer.Argument(help="Worktree whose live coordinates to print.")],
+    dotenv: Annotated[
+        bool, typer.Option("--dotenv", help="Print KEY=value lines instead of JSON.")
+    ] = False,
+) -> None:
+    """Print a worktree's exposed coordinates (`[agents] expose`) as JSON or dotenv."""
+    if not _daemon.is_running():
+        typer.secho("daemon not running", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    try:
+        res = ipc.call("env", {"root": str(Path.cwd()), "worktree": worktree})
+    except ipc.RpcError as exc:
+        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    coords = res["env"]
+    if dotenv:
+        for name, value in coords.items():
+            typer.echo(f"{name.upper()}_URL={value}")
+    else:
+        typer.echo(json.dumps(coords, indent=2))
+
+
+@app.command()
 def status(
     scope: Annotated[str, typer.Argument(help='"." to show only the current project')] = "",
 ) -> None:
@@ -152,7 +199,8 @@ def status(
                 state = "unhealthy" if wt.get("health") == "unhealthy" else "running"
             else:
                 state = wt["status"]
-            typer.echo(f"  {wt['worktree']}  [{state}]")
+            vtag = f" · {wt['verify']}" if wt.get("verify") else ""
+            typer.echo(f"  {wt['worktree']}  [{state}{vtag}]")
             for port in wt["ports"]:
                 label = f".{port['label']}" if port["label"] else ""
                 typer.echo(f"      {port['service']}{label}  :{port['port']}")

@@ -52,6 +52,8 @@ class Daemon:
         self.router.add("down", self._down)
         self.router.add("remove", self._remove)
         self.router.add("status", self._status)
+        self.router.add("verify", self._verify)
+        self.router.add("env", self._env)
 
     async def _ping(self, _params: dict) -> dict:
         return {"pong": True, "pid": os.getpid()}
@@ -159,6 +161,13 @@ class Daemon:
     async def _status(self, params: dict) -> dict:
         # read-only and thread-safe (connection-per-thread registry); no lock needed
         return await asyncio.to_thread(ops.status, self.registry, self.procman, params)
+
+    async def _verify(self, params: dict) -> dict:
+        async with self._wt_lock(params.get("root"), params.get("worktree")):
+            return await asyncio.to_thread(ops.verify, self.registry, self.procman, params)
+
+    async def _env(self, params: dict) -> dict:
+        return await asyncio.to_thread(ops.env, self.registry, params)
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
