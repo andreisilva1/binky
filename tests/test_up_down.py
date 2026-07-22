@@ -270,6 +270,7 @@ def test_remove_clean(tmp_path: Path) -> None:
 
     ipc.call("remove", {"root": str(proj), "worktree": "feat"})
     assert not wt_dir.exists()
+    assert not (paths.logs_dir() / "demo" / "feat").exists()  # logs retained until remove
     assert all(w["worktree"] != "feat" for w in ipc.call("status")["worktrees"])
 
 

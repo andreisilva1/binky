@@ -10,6 +10,7 @@ import contextlib
 import hashlib
 import os
 import re
+import shutil
 import subprocess
 import threading
 from pathlib import Path
@@ -526,6 +527,8 @@ def remove(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             raise RpcFault("git", str(exc)) from exc
     reg.release_ports(wt.id)
     reg.delete_worktree(wt.id)  # cascades to slices
+    # retention: a removed worktree keeps no logs around
+    shutil.rmtree(paths.logs_dir() / cfg.project.name / name, ignore_errors=True)
     return {"project": cfg.project.name, "worktree": name, "removed": True}
 
 

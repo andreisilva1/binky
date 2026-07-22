@@ -17,9 +17,21 @@ from collections import Counter
 
 from warren import paths
 
+# roll events.log at this size, keeping one previous generation (events.log.1)
+MAX_EVENTS_BYTES = 5 * 1024 * 1024
+
 
 def events_path():
     return paths.warren_home() / "events.log"
+
+
+def _rotate_if_big(path) -> None:
+    with contextlib.suppress(OSError):
+        if path.exists() and path.stat().st_size >= MAX_EVENTS_BYTES:
+            backup = path.parent / (path.name + ".1")
+            with contextlib.suppress(OSError):
+                backup.unlink()
+            path.rename(backup)
 
 
 def log_event(event: str, **fields: object) -> None:
@@ -28,6 +40,7 @@ def log_event(event: str, **fields: object) -> None:
     with contextlib.suppress(Exception):
         path = events_path()
         path.parent.mkdir(parents=True, exist_ok=True)
+        _rotate_if_big(path)
         with path.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(record) + "\n")
 

@@ -44,3 +44,14 @@ def test_log_event_writes_one_json_line(tmp_path: Path, monkeypatch) -> None:
     assert record["worktree"] == "feat"
     assert record["services"] == 3
     assert "ts" in record
+
+
+def test_events_log_rotates_by_size(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(observability, "MAX_EVENTS_BYTES", 200)
+    for i in range(50):
+        observability.log_event("tick", i=i, pad="x" * 20)
+
+    events = observability.events_path()
+    assert events.exists()
+    assert (events.parent / "events.log.1").exists()  # rolled at least once
