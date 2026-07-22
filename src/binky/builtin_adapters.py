@@ -303,7 +303,16 @@ class MySQLAdapter(Adapter):
 
     def _cli_args(self) -> list[str]:
         parts = self._parts
-        args = ["-h", parts.hostname or "localhost", "-P", str(parts.port or 3306)]
+        # `--protocol=TCP` is not optional: the MySQL client reads `-h localhost` as
+        # "use the Unix socket" and silently ignores `-P`, so an admin_url pointing at
+        # a server on localhost:3306 — a container, most of the time — probes as if the
+        # client were broken and downgrades `clone` to false. The driver in `_connect`
+        # already speaks TCP for that same URL; this makes the two agree.
+        args = [
+            "--protocol=TCP",
+            "-h", parts.hostname or "localhost",
+            "-P", str(parts.port or 3306),
+        ]
         if parts.username:
             args += ["-u", urllib.parse.unquote(parts.username)]
         return args

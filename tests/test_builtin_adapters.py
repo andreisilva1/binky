@@ -130,6 +130,14 @@ def test_mysql_rejects_an_unsafe_identifier() -> None:
         adapter._ident("acme`; DROP DATABASE x; --")
 
 
+def test_mysql_cli_is_forced_onto_tcp() -> None:
+    """`-h localhost` alone means "Unix socket" to the MySQL client, which then
+    ignores `-P` and cannot reach a server that only listens on TCP."""
+    args = MySQLAdapter({"admin_url": "mysql://root:pw@localhost:3306"})._cli_args()
+    assert "--protocol=TCP" in args
+    assert args[args.index("-P") + 1] == "3306"
+
+
 def test_mongo_strips_characters_mongo_forbids() -> None:
     assert "/" not in MongoAdapter._ident("acme/feat")
     assert "." not in MongoAdapter._ident("acme.feat")
