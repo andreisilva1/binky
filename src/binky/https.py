@@ -1,7 +1,7 @@
 """HTTPS via a bundled-by-convention Caddy in front of the Python proxy.
 
 The Python proxy handles http and all the dynamic Host routing; when a project asks
-for https, Warren puts **Caddy** in front of it to terminate TLS with a local CA
+for https, Binky puts **Caddy** in front of it to terminate TLS with a local CA
 (`tls internal`) — the split we chose (Python for http, Caddy for https). Caddy is
 used *if present on PATH*; if it isn't, https is skipped and http still works.
 
@@ -26,12 +26,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from warren import paths
+from binky import paths
 
 
 def caddy_binary() -> str | None:
-    """The Caddy executable on PATH, or ``None`` (``$WARREN_CADDY`` overrides)."""
-    return os.environ.get("WARREN_CADDY") or shutil.which("caddy")
+    """The Caddy executable on PATH, or ``None`` (``$BINKY_CADDY`` overrides)."""
+    return os.environ.get("BINKY_CADDY") or shutil.which("caddy")
 
 
 def render_caddyfile(proxy_port: int, https_port: int = 443) -> str:
@@ -66,7 +66,7 @@ class Caddy:
         return self._proc is not None and self._proc.poll() is None
 
     def _data_dir(self) -> Path:
-        return paths.warren_home() / "caddy"
+        return paths.binky_home() / "caddy"
 
     def _argv(self, caddyfile: Path) -> list[str]:
         return [str(self.binary), "run", "--config", str(caddyfile), "--adapter", "caddyfile"]
@@ -80,7 +80,7 @@ class Caddy:
         caddyfile = data / "Caddyfile"
         caddyfile.write_text(render_caddyfile(self.proxy_port, self.https_port), encoding="utf-8")
         log = open(data / "caddy.log", "ab")  # noqa: SIM115 — closed in stop()
-        # keep Caddy's CA + config under WARREN_HOME instead of the real user profile
+        # keep Caddy's CA + config under BINKY_HOME instead of the real user profile
         env = {**os.environ, "XDG_DATA_HOME": str(data), "XDG_CONFIG_HOME": str(data)}
         try:
             self._proc = subprocess.Popen(

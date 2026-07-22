@@ -1,4 +1,4 @@
-"""Warren command-line interface."""
+"""Binky command-line interface."""
 
 from __future__ import annotations
 
@@ -10,12 +10,12 @@ from typing import Annotated
 
 import typer
 
-from warren import __version__, init_cmd, ipc, paths
-from warren import daemon as _daemon
-from warren.config import ConfigError, load_config, security_warnings
+from binky import __version__, init_cmd, ipc, paths
+from binky import daemon as _daemon
+from binky.config import ConfigError, load_config, security_warnings
 
 app = typer.Typer(
-    name="warren",
+    name="binky",
     help="Isolated parallel dev environments, one per git worktree.",
     no_args_is_help=True,
     add_completion=False,
@@ -35,18 +35,18 @@ def main(
         typer.Option(
             "--version",
             "-V",
-            help="Show the Warren version and exit.",
+            help="Show the Binky version and exit.",
             callback=_version_callback,
             is_eager=True,
         ),
     ] = False,
 ) -> None:
-    """Warren — one repo, N agents, zero port collisions."""
+    """Binky — one repo, N agents, zero port collisions."""
 
 
 @app.command()
 def version() -> None:
-    """Print the Warren version."""
+    """Print the Binky version."""
     typer.echo(__version__)
 
 
@@ -56,11 +56,11 @@ def init(
         Path, typer.Argument(help="Project directory to read (default: current).")
     ] = Path("."),
     force: Annotated[
-        bool, typer.Option("--force", help="Overwrite an existing warren.toml.")
+        bool, typer.Option("--force", help="Overwrite an existing binky.toml.")
     ] = False,
 ) -> None:
-    """Write a starting `warren.toml` from docker-compose.yml and .env."""
-    target = directory / "warren.toml"
+    """Write a starting `binky.toml` from docker-compose.yml and .env."""
+    target = directory / "binky.toml"
     if target.exists() and not force:
         typer.secho(f"✗ {target} already exists — pass --force to overwrite", fg=typer.colors.RED)
         raise typer.Exit(code=1)
@@ -74,17 +74,17 @@ def init(
     typer.secho(f"✓ wrote {target}", fg=typer.colors.GREEN)
     for note in result.notes:
         typer.secho(f"  · {note}", fg=typer.colors.YELLOW)
-    typer.echo("Review it, then: warren check && warren up <worktree>")
+    typer.echo("Review it, then: binky check && binky up <worktree>")
 
 
 @app.command()
 def check(
     path: Annotated[
         Path,
-        typer.Argument(help="Path to the warren.toml to validate."),
-    ] = Path("warren.toml"),
+        typer.Argument(help="Path to the binky.toml to validate."),
+    ] = Path("binky.toml"),
 ) -> None:
-    """Validate a warren.toml and report any problems."""
+    """Validate a binky.toml and report any problems."""
     try:
         cfg = load_config(path)
     except ConfigError as exc:
@@ -215,9 +215,9 @@ def status(
     worktrees = ipc.call("status")["worktrees"]
     if scope == ".":
         try:
-            current = load_config(Path.cwd() / "warren.toml").project.name
+            current = load_config(Path.cwd() / "binky.toml").project.name
         except ConfigError:
-            typer.secho("not inside a warren project", fg=typer.colors.YELLOW)
+            typer.secho("not inside a binky project", fg=typer.colors.YELLOW)
             raise typer.Exit(code=1) from None
         worktrees = [w for w in worktrees if w["project"] == current]
     if not worktrees:
@@ -242,16 +242,16 @@ def status(
 def dashboard() -> None:
     """Open the live dashboard (TUI)."""
     _daemon.ensure()
-    from warren.dashboard import run as run_dashboard
+    from binky.dashboard import run as run_dashboard
 
     run_dashboard()
 
 
 @app.command()
 def mcp() -> None:
-    """Run the Warren MCP server (stdio) so AI agents can call Warren's verbs as tools."""
+    """Run the Binky MCP server (stdio) so AI agents can call Binky's verbs as tools."""
     try:
-        from warren.mcp import serve
+        from binky.mcp import serve
 
         serve()
     except RuntimeError as exc:
@@ -288,7 +288,7 @@ def _human(n: float) -> str:
 
 @app.command()
 def doctor() -> None:
-    """Diagnose the Warren install + daemon; exit non-zero if something is wrong."""
+    """Diagnose the Binky install + daemon; exit non-zero if something is wrong."""
     ok = True
 
     def line(passed: bool, label: str, detail: str = "", warn: bool = False) -> None:
@@ -305,14 +305,14 @@ def doctor() -> None:
     line(running, "daemon reachable", "" if running else "starts on demand", warn=not running)
 
     try:
-        from warren.registry import Registry, default_db_path
+        from binky.registry import Registry, default_db_path
 
         Registry.connect().close()
         line(True, "registry openable", str(default_db_path()))
     except Exception as exc:
         line(False, "registry openable", str(exc))
 
-    from warren.https import caddy_binary
+    from binky.https import caddy_binary
 
     caddy = caddy_binary()
     line(bool(caddy), "Caddy (https)", caddy or "not on PATH — https unavailable", warn=not caddy)
@@ -335,7 +335,7 @@ def doctor() -> None:
 def logs(worktree: Annotated[str, typer.Argument(help="Worktree to show logs for.")]) -> None:
     """Print a worktree's captured service logs."""
     try:
-        project = load_config(Path.cwd() / "warren.toml").project.name
+        project = load_config(Path.cwd() / "binky.toml").project.name
     except ConfigError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
@@ -349,7 +349,7 @@ def logs(worktree: Annotated[str, typer.Argument(help="Worktree to show logs for
         typer.echo(log.read_text(encoding="utf-8", errors="ignore").rstrip())
 
 
-daemon_app = typer.Typer(help="Manage the Warren daemon.", no_args_is_help=True)
+daemon_app = typer.Typer(help="Manage the Binky daemon.", no_args_is_help=True)
 app.add_typer(daemon_app, name="daemon")
 
 
@@ -361,14 +361,14 @@ def serve() -> None:
 
 @daemon_app.command()
 def start() -> None:
-    """Start the Warren daemon (no-op if already running)."""
+    """Start the Binky daemon (no-op if already running)."""
     _daemon.start()
     typer.secho("✓ daemon running", fg=typer.colors.GREEN)
 
 
 @daemon_app.command()
 def stop() -> None:
-    """Stop the Warren daemon."""
+    """Stop the Binky daemon."""
     if _daemon.stop():
         typer.secho("✓ daemon stopped", fg=typer.colors.GREEN)
     else:

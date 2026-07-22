@@ -1,7 +1,7 @@
 """Tests for token resolution + environment building."""
 
-from warren import resolve
-from warren.config import load_config_data
+from binky import resolve
+from binky.config import load_config_data
 
 PORTS = {("web", ""): 4110, ("api", "http"): 4111, ("api", "grpc"): 4200}
 
@@ -41,7 +41,7 @@ def test_build_env() -> None:
     env = resolve.build_env("web", cfg.services["web"], PORTS, "login-fix")
     assert env["PORT"] == "4110"
     assert env["API"] == "http://localhost:4111"
-    assert env["WARREN_WORKTREE"] == "login-fix"
+    assert env["BINKY_WORKTREE"] == "login-fix"
 
     env_api = resolve.build_env("api", cfg.services["api"], PORTS, "login-fix")
     assert env_api["PORT"] == "4111"  # primary = first declared port

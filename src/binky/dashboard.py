@@ -13,11 +13,11 @@ from typing import ClassVar
 from textual.app import App, ComposeResult
 from textual.widgets import DataTable, Footer, Header
 
-from warren import ipc
+from binky import ipc
 
 
 class Dashboard(App):
-    TITLE = "warren"
+    TITLE = "binky"
     BINDINGS: ClassVar = [("q", "quit", "Quit"), ("r", "refresh", "Refresh")]
 
     def compose(self) -> ComposeResult:

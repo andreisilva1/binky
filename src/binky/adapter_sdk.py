@@ -1,10 +1,10 @@
-"""SDK for writing a Warren adapter as a standalone executable (the external tier).
+"""SDK for writing a Binky adapter as a standalone executable (the external tier).
 
 Author the *same* class shape as an in-process adapter, then let ``run`` speak the
 subprocess+JSON protocol for you::
 
     #!/usr/bin/env python
-    from warren.adapter_sdk import Adapter, run
+    from binky.adapter_sdk import Adapter, run
 
     class MyAdapter(Adapter):
         CAPABILITIES = {"clone": False}
@@ -16,8 +16,8 @@ subprocess+JSON protocol for you::
     if __name__ == "__main__":
         run(MyAdapter)
 
-Install the file as ``warren-adapter-<name>`` on PATH and reference it as
-``adapter = "<name>"`` in ``warren.toml``. Non-Python authors implement the same
+Install the file as ``binky-adapter-<name>`` on PATH and reference it as
+``adapter = "<name>"`` in ``binky.toml``. Non-Python authors implement the same
 protocol directly (one JSON request on stdin, one JSON response on stdout).
 """
 
@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import sys
 
-from warren.adapters import Adapter, AdapterError
+from binky.adapters import Adapter, AdapterError
 
 __all__ = ["Adapter", "AdapterError", "run"]
 

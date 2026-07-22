@@ -2,7 +2,7 @@
 
 import asyncio
 
-from warren.admission import AdmissionController
+from binky.admission import AdmissionController
 
 
 def _run(coro):

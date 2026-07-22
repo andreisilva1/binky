@@ -20,8 +20,8 @@ import time
 import urllib.error
 import urllib.request
 
-from warren import resolve
-from warren.config import Service
+from binky import resolve
+from binky.config import Service
 
 DEFAULT_TIMEOUT = 30.0
 

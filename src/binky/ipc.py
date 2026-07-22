@@ -3,7 +3,7 @@
 One request/response per connection, newline-delimited JSON, with a shared-secret
 token. Transport is chosen by OS: a Unix-domain socket on posix, a loopback TCP
 port on Windows (asyncio has no Unix sockets there). The client here is
-synchronous — a one-shot control call; the server lives in :mod:`warren.daemon`.
+synchronous — a one-shot control call; the server lives in :mod:`binky.daemon`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import os
 import socket
 from dataclasses import asdict, dataclass
 
-from warren import paths
+from binky import paths
 
 USE_UNIX = os.name != "nt"
 

@@ -1,9 +1,9 @@
-"""Smoke tests for the Warren CLI entrypoint."""
+"""Smoke tests for the Binky CLI entrypoint."""
 
 from typer.testing import CliRunner
 
-from warren import __version__
-from warren.cli import app
+from binky import __version__
+from binky.cli import app
 
 runner = CliRunner()
 
@@ -27,10 +27,10 @@ def test_no_args_shows_help() -> None:
 
 
 def test_logs_command(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "warren.toml").write_text(
+    (proj / "binky.toml").write_text(
         '[project]\nname = "demo"\n[services.x]\ncmd = "run"\n', encoding="utf-8"
     )
     monkeypatch.chdir(proj)

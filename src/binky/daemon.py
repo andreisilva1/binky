@@ -1,4 +1,4 @@
-"""The always-alive Warren daemon.
+"""The always-alive Binky daemon.
 
 An asyncio server that owns the machine-global state and answers CLI requests.
 It is spawned lazily and detached, so it outlives the CLI process; it writes its
@@ -20,10 +20,10 @@ import subprocess
 import sys
 import time
 
-from warren import admission, ipc, observability, ops, paths, proxy, rpc
-from warren.https import Caddy
-from warren.registry import Registry, WorktreeStatus
-from warren.supervisor import ProcessManager, TickReport
+from binky import admission, ipc, observability, ops, paths, proxy, rpc
+from binky.https import Caddy
+from binky.registry import Registry, WorktreeStatus
+from binky.supervisor import ProcessManager, TickReport
 
 SUPERVISE_INTERVAL = 2.0  # seconds between live supervision ticks
 
@@ -67,7 +67,7 @@ class Daemon:
         return {"methods": self.router.names()}
 
     async def _version(self, _params: dict) -> dict:
-        from warren import __version__
+        from binky import __version__
 
         return {"version": __version__}
 
@@ -126,7 +126,7 @@ class Daemon:
         """Lazily front the running proxy with Caddy for TLS (once, if Caddy is present)."""
         if self._caddy is not None or self._proxy_port <= 0:
             return
-        caddy = Caddy(self._proxy_port, https_port=int(os.environ.get("WARREN_HTTPS_PORT", "443")))
+        caddy = Caddy(self._proxy_port, https_port=int(os.environ.get("BINKY_HTTPS_PORT", "443")))
         if caddy.available and caddy.start():
             self._caddy = caddy
 
@@ -228,7 +228,7 @@ class Daemon:
             with contextlib.suppress(NotImplementedError, ValueError):
                 loop.add_signal_handler(sig, self._stop.set)
 
-        proxy_port = int(os.environ.get("WARREN_PROXY_PORT", "80"))
+        proxy_port = int(os.environ.get("BINKY_PROXY_PORT", "80"))
         if proxy_port > 0:
             with contextlib.suppress(OSError):
                 await self.proxy.start(proxy_port)
@@ -292,7 +292,7 @@ def start(timeout: float = 10.0) -> None:
         kwargs["creationflags"] = subprocess.DETACHED_PROCESS
     else:
         kwargs["start_new_session"] = True
-    subprocess.Popen([sys.executable, "-m", "warren", "daemon", "serve"], **kwargs)
+    subprocess.Popen([sys.executable, "-m", "binky", "daemon", "serve"], **kwargs)
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

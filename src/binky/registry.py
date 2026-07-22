@@ -1,6 +1,6 @@
 """The machine-global registry — the daemon's source of truth.
 
-SQLite at ``~/.warren/warren.db`` (WAL, foreign keys, busy-timeout). Holds the
+SQLite at ``~/.binky/binky.db`` (WAL, foreign keys, busy-timeout). Holds the
 *desired state* the reconciler converges against: worktrees, their allocated
 ports, and their resource slices. Everything the daemon owns lives here — which
 is also what makes teardown ownership-safe: teardown only touches rows
@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from warren import paths
+from binky import paths
 
 SCHEMA_VERSION = 2
 
@@ -33,14 +33,14 @@ def _migrate_2_verify_status(conn: sqlite3.Connection) -> None:
 
 
 # version -> upgrade step. Applied in order for any DB below SCHEMA_VERSION, so a
-# Warren upgrade never strands an existing registry. Steps must be idempotent.
+# Binky upgrade never strands an existing registry. Steps must be idempotent.
 _MIGRATIONS = {2: _migrate_2_verify_status}
 
 
 class WorktreeStatus(StrEnum):
     provisioning = "provisioning"
     ready = "ready"
-    stopped = "stopped"  # paused via `warren down` — the reconciler must not GC these
+    stopped = "stopped"  # paused via `binky down` — the reconciler must not GC these
 
 
 class SliceStatus(StrEnum):
@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS processes (
 
 
 def default_db_path() -> Path:
-    """``$WARREN_HOME/warren.db`` (default ``~/.warren/warren.db``)."""
+    """``$BINKY_HOME/binky.db`` (default ``~/.binky/binky.db``)."""
     return paths.db_path()
 
 

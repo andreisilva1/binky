@@ -2,7 +2,7 @@
 
 import asyncio
 
-from warren import rpc
+from binky import rpc
 
 
 def _run(coro):

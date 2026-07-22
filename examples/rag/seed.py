@@ -1,9 +1,9 @@
 """Embed a corpus and build the index — the expensive step this example is about.
 
-With a real encoder this is minutes, not seconds. Warren pays it once, into a
+With a real encoder this is minutes, not seconds. Binky pays it once, into a
 golden template, and every worktree after that is a copy.
 
-Set CHUNKS to make the cost obvious; the default keeps `warren up` quick.
+Set CHUNKS to make the cost obvious; the default keeps `binky up` quick.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ OBJECTS = [
 # in the corpus talks about worktrees, so a working search must surface it.
 PLANTED = (
     "handbook.md",
-    "Warren gives every git worktree its own isolated database, "
+    "Binky gives every git worktree its own isolated database, "
     "so parallel agents never share a schema.",
 )
 

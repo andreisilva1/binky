@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from warren import adapters
+from binky import adapters
 
 README = Path(__file__).resolve().parent.parent / "README.md"
 

@@ -5,12 +5,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from warren import ops, supervisor
-from warren.registry import Registry, WorktreeStatus
+from binky import ops, supervisor
+from binky.registry import Registry, WorktreeStatus
 
 
 def test_reconcile_kills_orphans_and_sweeps(tmp_path: Path) -> None:
-    reg = Registry.connect(tmp_path / "warren.db")
+    reg = Registry.connect(tmp_path / "binky.db")
     orphan_proc = subprocess.Popen(
         [sys.executable, "-c", "import time; time.sleep(30)"], **supervisor._new_group_kwargs()
     )
@@ -42,7 +42,7 @@ def test_reconcile_kills_orphans_and_sweeps(tmp_path: Path) -> None:
 
 
 def test_reconcile_leaves_stopped_untouched(tmp_path: Path) -> None:
-    reg = Registry.connect(tmp_path / "warren.db")
+    reg = Registry.connect(tmp_path / "binky.db")
     try:
         wt = reg.create_worktree("p", "a", "/x", "a", status=WorktreeStatus.stopped)
         reg.allocate_port(wt.id, "web", "", 4500)

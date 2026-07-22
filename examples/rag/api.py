@@ -1,6 +1,6 @@
 """A search endpoint over this worktree's own vector database.
 
-Binds $PORT (Warren allocated it) and reads $DATABASE_URL (Warren provisioned
+Binds $PORT (Binky allocated it) and reads $DATABASE_URL (Binky provisioned
 the slice behind it). Neither is hardcoded, which is the whole point: the same
 file runs unchanged in every worktree, against a different database each time.
 
@@ -19,7 +19,7 @@ from embed import embed, literal
 
 PORT = int(os.environ.get("PORT", "8000"))
 DATABASE_URL = os.environ["DATABASE_URL"]
-WORKTREE = os.environ.get("WARREN_WORKTREE", "?")
+WORKTREE = os.environ.get("BINKY_WORKTREE", "?")
 
 SEARCH = """
 SELECT source, body, 1 - (vec <=> %s::vector) AS score
@@ -48,7 +48,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(payload)
 
     def log_message(self, *_args) -> None:
-        pass  # Warren already logs; a second copy on stderr is noise
+        pass  # Binky already logs; a second copy on stderr is noise
 
 
 with http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler) as httpd:

@@ -4,13 +4,13 @@ import socket
 
 import pytest
 
-from warren import allocator
-from warren.registry import Registry
+from binky import allocator
+from binky.registry import Registry
 
 
 @pytest.fixture
 def reg(tmp_path):
-    r = Registry.connect(tmp_path / "warren.db")
+    r = Registry.connect(tmp_path / "binky.db")
     yield r
     r.close()
 

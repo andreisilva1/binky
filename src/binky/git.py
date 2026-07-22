@@ -1,7 +1,7 @@
 """Thin git-worktree helpers.
 
-`warren up <name>` uses the branch if it exists, else creates it off HEAD, and
-checks it out into its own worktree directory. Warren never commits — the agent
+`binky up <name>` uses the branch if it exists, else creates it off HEAD, and
+checks it out into its own worktree directory. Binky never commits — the agent
 or the human does; these helpers only manage worktrees.
 """
 

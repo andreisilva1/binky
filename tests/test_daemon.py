@@ -4,13 +4,13 @@ import contextlib
 
 import pytest
 
-from warren import daemon, ipc
+from binky import daemon, ipc
 
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path))
-    monkeypatch.setenv("WARREN_PROXY_PORT", "0")
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path))
+    monkeypatch.setenv("BINKY_PROXY_PORT", "0")
     yield
     # best-effort: never leave a spawned daemon behind
     with contextlib.suppress(Exception):

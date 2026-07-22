@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from warren import ops
-from warren.config import load_config_data
-from warren.rpc import RpcFault
+from binky import ops
+from binky.config import load_config_data
+from binky.rpc import RpcFault
 
 
 def test_select_services_group_closure() -> None:
@@ -41,7 +41,7 @@ def test_load_env_files(tmp_path: Path) -> None:
 
 
 def test_run_setup_is_idempotent(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
     counter = tmp_path / "count.txt"
     (tmp_path / "mark.py").write_text(f"open(r'{counter}', 'a').write('x')", encoding="utf-8")
     cfg = load_config_data(

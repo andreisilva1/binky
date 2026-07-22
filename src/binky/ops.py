@@ -15,11 +15,11 @@ import subprocess
 import threading
 from pathlib import Path
 
-from warren import adapters, allocator, git, health, observability, paths, resolve
-from warren.config import ConfigError, load_config
-from warren.registry import Registry, WorktreeStatus
-from warren.rpc import RpcFault
-from warren.supervisor import ProcessManager, kill_pid
+from binky import adapters, allocator, git, health, observability, paths, resolve
+from binky.config import ConfigError, load_config
+from binky.registry import Registry, WorktreeStatus
+from binky.rpc import RpcFault
+from binky.supervisor import ProcessManager, kill_pid
 
 # A worktree name becomes a git branch, a directory, and the ``${worktree}`` token
 # that flows into shell commands — so restrict it to a shell-safe, path-safe charset.
@@ -38,7 +38,7 @@ def _load(root: str | None):
     if not root:
         raise RpcFault("bad_request", "missing 'root'")
     try:
-        return load_config(Path(root) / "warren.toml")
+        return load_config(Path(root) / "binky.toml")
     except ConfigError as exc:
         raise RpcFault("config", str(exc)) from exc
 
@@ -87,7 +87,7 @@ def _adapter_config(svc, sname: str, ports: dict, worktree: str) -> dict:
     ``options`` is flattened in rather than nested so an adapter reads one plain
     dict; the reserved keys below always win, so an option can never shadow them.
     Every value goes through ``${env.X}`` resolution, which is how credentials stay
-    out of a committed ``warren.toml``.
+    out of a committed ``binky.toml``.
     """
     options = {k: resolve.resolve(v, sname, ports, worktree) for k, v in svc.options.items()}
     return {
@@ -107,7 +107,7 @@ def _ensure_golden(adapter, svc, sname: str, wt, project: str) -> str:
     """
     golden = _golden_slice_name(project, svc.clone_from)
     digest = hashlib.sha256(f"{svc.migrate}\x00{svc.seed}".encode()).hexdigest()
-    marker = paths.warren_home() / "golden" / svc.adapter.split("@", 1)[0] / golden
+    marker = paths.binky_home() / "golden" / svc.adapter.split("@", 1)[0] / golden
     with _golden_lock(golden):
         if marker.exists() and marker.read_text(encoding="utf-8").strip() == digest:
             return golden  # already built at this migrate+seed
@@ -283,7 +283,7 @@ def env(reg: Registry, params: dict) -> dict:
 def verify(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     """Run ``[agents] verify`` against the live worktree and record the verdict.
 
-    Warren is the substrate, so it doesn't decide *when* work is done — a driver
+    Binky is the substrate, so it doesn't decide *when* work is done — a driver
     calls this at its done moment. It runs the checks against the exposed env and
     persists ``passing``/``failing`` as worktree state; the exit verdict is the gate.
     """
@@ -373,7 +373,7 @@ def _run_setup(svc, sname: str, project: str, worktree: str, cwd: str, env: dict
     """Run a service's `setup` once per worktree (re-run only if the command changed)."""
     if not svc.setup:
         return
-    marker = paths.warren_home() / "setup" / project / worktree / sname
+    marker = paths.binky_home() / "setup" / project / worktree / sname
     digest = hashlib.sha256(svc.setup.encode()).hexdigest()
     if marker.exists() and marker.read_text(encoding="utf-8").strip() == digest:
         return

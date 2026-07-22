@@ -1,8 +1,8 @@
 # A vector-search app where every worktree gets its own embedded corpus.
 #
-#   export WARREN_PG_ADMIN=postgres://postgres:postgres@localhost:5432/postgres
-#   warren up feature-a
-#   warren up feature-b
+#   export BINKY_PG_ADMIN=postgres://postgres:postgres@localhost:5432/postgres
+#   binky up feature-a
+#   binky up feature-b
 #   curl "http://api.feature-a.rag.localhost/?q=isolated+database"
 #
 # The corpus is embedded ONCE into a golden template; feature-b is a copy of it,
@@ -14,7 +14,7 @@ name = "rag"
 adapter = "postgres"
 # Never inline a password here — this file is committed. `${env.X}` reads the
 # environment; `env_file` reads a gitignored file.
-admin_url = "${env.WARREN_PG_ADMIN}"
+admin_url = "${env.BINKY_PG_ADMIN}"
 migrate = "python migrate.py"
 seed = "python seed.py"
 # Build the expensive world once, then copy it per worktree.
@@ -26,6 +26,6 @@ url = "api"
 depends_on = ["db"]
 env = { DATABASE_URL = "${db.url}" }
 
-# What `warren env <worktree>` hands to an agent (or to you).
+# What `binky env <worktree>` hands to an agent (or to you).
 [agents]
 expose = ["db", "api"]

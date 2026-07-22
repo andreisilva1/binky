@@ -2,11 +2,11 @@
 
 import asyncio
 
-from warren.dashboard import Dashboard
+from binky.dashboard import Dashboard
 
 
 def test_dashboard_mounts(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path))  # no daemon → status call fails, caught
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path))  # no daemon → status call fails, caught
 
     async def scenario() -> None:
         app = Dashboard()

@@ -3,8 +3,8 @@
 import json
 from pathlib import Path
 
-from warren import observability
-from warren.registry import Registry, WorktreeStatus
+from binky import observability
+from binky.registry import Registry, WorktreeStatus
 
 
 class _FakeProc:
@@ -19,7 +19,7 @@ class _FakeAdmission:
 
 
 def test_collect_metrics(tmp_path: Path) -> None:
-    reg = Registry.connect(tmp_path / "warren.db")
+    reg = Registry.connect(tmp_path / "binky.db")
     wt = reg.create_worktree("acme", "a", "/x", "a")
     reg.set_worktree_status(wt.id, WorktreeStatus.ready)
     reg.set_verify_status(wt.id, "passing")
@@ -35,7 +35,7 @@ def test_collect_metrics(tmp_path: Path) -> None:
 
 
 def test_log_event_writes_one_json_line(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
     observability.log_event("up", worktree="feat", services=3)
 
     line = observability.events_path().read_text(encoding="utf-8").strip()
@@ -47,7 +47,7 @@ def test_log_event_writes_one_json_line(tmp_path: Path, monkeypatch) -> None:
 
 
 def test_events_log_rotates_by_size(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
     monkeypatch.setattr(observability, "MAX_EVENTS_BYTES", 200)
     for i in range(50):
         observability.log_event("tick", i=i, pad="x" * 20)

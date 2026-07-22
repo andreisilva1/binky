@@ -1,10 +1,10 @@
-"""Tests for the warren.toml config model + loader."""
+"""Tests for the binky.toml config model + loader."""
 
 from pathlib import Path
 
 import pytest
 
-from warren.config import ConfigError, SyncMode, load_config, load_config_data
+from binky.config import ConfigError, SyncMode, load_config, load_config_data
 
 VALID = """
 [project]
@@ -60,7 +60,7 @@ post_up = "echo ${worktree}"
 
 
 def _write(tmp_path: Path, text: str) -> Path:
-    p = tmp_path / "warren.toml"
+    p = tmp_path / "binky.toml"
     p.write_text(text, encoding="utf-8")
     return p
 
@@ -123,7 +123,7 @@ def test_bad_port_range() -> None:
 
 
 def test_missing_file(tmp_path: Path) -> None:
-    with pytest.raises(ConfigError, match=r"no warren\.toml"):
+    with pytest.raises(ConfigError, match=r"no binky\.toml"):
         load_config(tmp_path / "nope.toml")
 
 

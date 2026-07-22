@@ -15,16 +15,16 @@ Postgres needs the `vector` extension — the stock image doesn't have it:
 docker run -d --name pgvector -p 5433:5432 \
   -e POSTGRES_PASSWORD=postgres pgvector/pgvector:pg16
 
-export WARREN_PG_ADMIN=postgres://postgres:postgres@localhost:5433/postgres
-pip install 'warren[postgres]'
+export BINKY_PG_ADMIN=postgres://postgres:postgres@localhost:5433/postgres
+pip install 'binky[postgres]'
 ```
 
 Then, from this directory:
 
 ```bash
-warren up feature-a       # embeds the corpus once, into a golden template
-warren up feature-b       # copies it
-warren status
+binky up feature-a       # embeds the corpus once, into a golden template
+binky up feature-b       # copies it
+binky status
 ```
 
 Ask each worktree the same question:
@@ -37,7 +37,7 @@ curl "http://api.feature-b.rag.localhost/?q=git+worktree+isolated+database"
 Same answer, two databases. Now break one on purpose:
 
 ```bash
-eval "$(warren env feature-a --dotenv)"                          # DB_URL, API_URL
+eval "$(binky env feature-a --dotenv)"                          # DB_URL, API_URL
 psql "$DB_URL" -c "TRUNCATE chunks"
 curl "http://api.feature-a.rag.localhost/?q=git+worktree+isolated+database"   # empty
 curl "http://api.feature-b.rag.localhost/?q=git+worktree+isolated+database"   # untouched
@@ -47,12 +47,12 @@ That is the entire pitch. `feature-b` never noticed.
 
 ## What makes the second worktree cheap
 
-`clone_from = "corpus"` in [warren.toml](warren.toml). The first `warren up`
+`clone_from = "corpus"` in [binky.toml](binky.toml). The first `binky up`
 provisions a database nobody owns, runs `migrate` and `seed` into it, and marks
-it with a hash of both commands. Every `warren up` after that issues
+it with a hash of both commands. Every `binky up` after that issues
 `CREATE DATABASE ... TEMPLATE corpus` and skips the hooks entirely.
 
-Edit `seed.py` and the hash changes, so the next `warren up` rebuilds the golden
+Edit `seed.py` and the hash changes, so the next `binky up` rebuilds the golden
 once and clones from the new one. You never invalidate it by hand.
 
 The saving is proportional to how expensive your seed is. Here, with a fake
@@ -72,15 +72,15 @@ def embed(text: str) -> list[float]:
 `DIM` is already 384, which is `all-MiniLM-L6-v2`'s output size, so that swap
 needs no schema change. Editing `embed.py` alone does *not* rebuild the golden
 template — the hash watches `migrate` and `seed`, not the files they import — so
-delete the marker under `~/.warren/golden/` to force one.
+delete the marker under `~/.binky/golden/` to force one.
 
 ## Honest limits
 
 - **Cloning copies bytes.** `CREATE DATABASE ... TEMPLATE` is a file copy, not
   copy-on-write. Ten worktrees hold ten copies of the corpus. It buys you *time*,
   not disk. If disk is what hurts, a branching Postgres (Neon) is the answer, and
-  Warren has an adapter for that too.
-- **The extension must exist on the server.** Warren provisions databases; it
+  Binky has an adapter for that too.
+- **The extension must exist on the server.** Binky provisions databases; it
   does not install Postgres extensions it wasn't given. `CREATE EXTENSION` in
   `migrate.py` fails on a stock `postgres:16` image with a clear error.
 - **There is no ANN index here, on purpose.** 2,000 rows is an exact scan in

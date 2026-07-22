@@ -5,12 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from warren.registry import Registry, SliceStatus, WorktreeStatus
+from binky.registry import Registry, SliceStatus, WorktreeStatus
 
 
 @pytest.fixture
 def reg(tmp_path: Path) -> Registry:
-    r = Registry.connect(tmp_path / "warren.db")
+    r = Registry.connect(tmp_path / "binky.db")
     yield r
     r.close()
 
@@ -110,7 +110,7 @@ def test_transaction_rolls_back(reg: Registry) -> None:
 
 
 def test_persistence_across_reopen(tmp_path: Path) -> None:
-    db = tmp_path / "warren.db"
+    db = tmp_path / "binky.db"
     r1 = Registry.connect(db)
     r1.create_worktree("acme", "a", "/x", "a")
     r1.close()
@@ -121,7 +121,7 @@ def test_persistence_across_reopen(tmp_path: Path) -> None:
 
 
 def test_two_connections_see_committed_writes(tmp_path: Path) -> None:
-    db = tmp_path / "warren.db"
+    db = tmp_path / "binky.db"
     r1 = Registry.connect(db)
     r2 = Registry.connect(db)
     r1.create_worktree("acme", "a", "/x", "a")  # autocommitted
@@ -130,15 +130,15 @@ def test_two_connections_see_committed_writes(tmp_path: Path) -> None:
     r2.close()
 
 
-def test_default_db_path_respects_warren_home(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
-    from warren.registry import default_db_path
+def test_default_db_path_respects_binky_home(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
+    from binky.registry import default_db_path
 
-    assert default_db_path() == tmp_path / "home" / "warren.db"
+    assert default_db_path() == tmp_path / "home" / "binky.db"
 
 
 def test_fresh_db_is_at_current_schema(tmp_path: Path) -> None:
-    reg = Registry.connect(tmp_path / "warren.db")
+    reg = Registry.connect(tmp_path / "binky.db")
     version = reg._conn.execute("PRAGMA user_version").fetchone()[0]
     assert version == 2
     reg.close()
@@ -146,7 +146,7 @@ def test_fresh_db_is_at_current_schema(tmp_path: Path) -> None:
 
 def test_migrates_legacy_v1_database(tmp_path: Path) -> None:
     """A v1 registry (no verify_status) is upgraded in place, not stranded."""
-    db = tmp_path / "warren.db"
+    db = tmp_path / "binky.db"
     legacy = sqlite3.connect(db)
     legacy.execute(
         "CREATE TABLE worktrees (id INTEGER PRIMARY KEY, project TEXT, name TEXT, path TEXT,"

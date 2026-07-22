@@ -102,19 +102,19 @@ jobs:
 
       - name: Test against real servers
         env:
-          WARREN_TEST_PG: postgres://postgres:postgres@localhost:5432/postgres
-          WARREN_TEST_REDIS: redis://localhost:6379
-          WARREN_TEST_MYSQL: mysql://root:mysql@localhost:3306
-          WARREN_TEST_MONGO: mongodb://localhost:27017
-          WARREN_TEST_S3: http://localhost:9000
-          WARREN_TEST_S3_KEY: minioadmin
-          WARREN_TEST_S3_SECRET: minioadmin
+          BINKY_TEST_PG: postgres://postgres:postgres@localhost:5432/postgres
+          BINKY_TEST_REDIS: redis://localhost:6379
+          BINKY_TEST_MYSQL: mysql://root:mysql@localhost:3306
+          BINKY_TEST_MONGO: mongodb://localhost:27017
+          BINKY_TEST_S3: http://localhost:9000
+          BINKY_TEST_S3_KEY: minioadmin
+          BINKY_TEST_S3_SECRET: minioadmin
         run: python -m pytest -q tests/test_adapters.py tests/test_builtin_adapters.py
 
       - name: Assert the MySQL clone path actually ran
         run: |
           python - <<'PY'
-          from warren import adapters
+          from binky import adapters
           caps = adapters.get("mysql", {"admin_url": "mysql://root:mysql@localhost:3306"}).capabilities()
           assert caps["clone"], f"CI must exercise the mysql clone path, got {caps}"
           print("mysql clone capability confirmed in CI")
@@ -188,11 +188,11 @@ jobs:
 
       - name: Test against real servers
         env:
-          WARREN_TEST_RABBITMQ: http://guest:guest@localhost:15672
-          WARREN_TEST_KAFKA: kafka://localhost:9092
-          WARREN_TEST_QDRANT: http://localhost:6333
-          WARREN_TEST_CLICKHOUSE: http://default:@localhost:8123
-          WARREN_TEST_ELASTICSEARCH: http://localhost:9200
+          BINKY_TEST_RABBITMQ: http://guest:guest@localhost:15672
+          BINKY_TEST_KAFKA: kafka://localhost:9092
+          BINKY_TEST_QDRANT: http://localhost:6333
+          BINKY_TEST_CLICKHOUSE: http://default:@localhost:8123
+          BINKY_TEST_ELASTICSEARCH: http://localhost:9200
         run: python -m pytest -q tests/test_adapters.py tests/test_builtin_adapters.py
 
       - name: Container logs on failure

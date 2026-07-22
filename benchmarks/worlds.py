@@ -1,6 +1,6 @@
 """How much does one more parallel world cost?
 
-Warren's claim is that N isolated worlds should not cost N times one world. This
+Binky's claim is that N isolated worlds should not cost N times one world. This
 measures that against the thing people actually do today — a container per
 worktree (what `docker compose up` in each checkout gives you) — on three axes:
 
@@ -11,18 +11,18 @@ worktree (what `docker compose up` in each checkout gives you) — on three axes
 Two arms, same Postgres image, same schema, same row count:
 
     container-per-worktree   N Postgres containers, each seeded from scratch
-    warren                   1 Postgres container, N databases cloned from a
+    binky                   1 Postgres container, N databases cloned from a
                              golden template (exactly what the postgres adapter
                              does: CREATE DATABASE ... TEMPLATE)
 
-What this deliberately does NOT measure: your own app processes. Warren does not
+What this deliberately does NOT measure: your own app processes. Binky does not
 make those cheaper — one dev server per worktree costs the same either way. The
 comparison is the *backing services*, which is the part that differs.
 
     python benchmarks/worlds.py --worlds 5 --rows 200000
 
-Requires Docker and `pip install 'warren[postgres]'`. Every container it creates
-is named `warrenbench-*` and is removed on the way out, including on failure.
+Requires Docker and `pip install 'binky[postgres]'`. Every container it creates
+is named `binkybench-*` and is removed on the way out, including on failure.
 """
 
 from __future__ import annotations
@@ -36,7 +36,7 @@ import sys
 import time
 
 IMAGE = "postgres:16"
-PREFIX = "warrenbench"
+PREFIX = "binkybench"
 PASSWORD = "bench"
 BASE_PORT = 55432
 
@@ -160,8 +160,8 @@ def arm_containers(worlds: int, rows: int) -> dict:
 # --------------------------------------------------------------------------- #
 #  arm 2 — one server, a database per worktree, cloned from a golden template
 # --------------------------------------------------------------------------- #
-def arm_warren(worlds: int, rows: int) -> dict:
-    name, port = f"{PREFIX}-warren", BASE_PORT + 100
+def arm_binky(worlds: int, rows: int) -> dict:
+    name, port = f"{PREFIX}-binky", BASE_PORT + 100
     start_postgres(name, port)
     wait_ready(name, port)
 
@@ -192,24 +192,24 @@ def arm_warren(worlds: int, rows: int) -> dict:
     }
 
 
-def report(worlds: int, rows: int, solo: dict, warren: dict) -> str:
+def report(worlds: int, rows: int, solo: dict, binky: dict) -> str:
     def ratio(a: float, b: float) -> str:
         return f"{a / b:.1f}x" if b else "n/a"
 
     lines = [
         f"### {worlds} parallel worlds · {rows:,} rows each · {IMAGE}",
         "",
-        "| | container per worktree | Warren (shared server) | |",
+        "| | container per worktree | Binky (shared server) | |",
         "| --- | ---: | ---: | ---: |",
-        f"| RAM | {solo['ram_mib']:.0f} MiB | {warren['ram_mib']:.0f} MiB | "
-        f"**{ratio(solo['ram_mib'], warren['ram_mib'])} less** |",
-        f"| Disk | {solo['disk_mib']:.0f} MiB | {warren['disk_mib']:.0f} MiB | "
-        f"{ratio(solo['disk_mib'], warren['disk_mib'])} |",
-        f"| Time to N ready worlds | {solo['seconds']:.0f}s | {warren['seconds']:.0f}s | "
-        f"**{ratio(solo['seconds'], warren['seconds'])} faster** |",
+        f"| RAM | {solo['ram_mib']:.0f} MiB | {binky['ram_mib']:.0f} MiB | "
+        f"**{ratio(solo['ram_mib'], binky['ram_mib'])} less** |",
+        f"| Disk | {solo['disk_mib']:.0f} MiB | {binky['disk_mib']:.0f} MiB | "
+        f"{ratio(solo['disk_mib'], binky['disk_mib'])} |",
+        f"| Time to N ready worlds | {solo['seconds']:.0f}s | {binky['seconds']:.0f}s | "
+        f"**{ratio(solo['seconds'], binky['seconds'])} faster** |",
         "",
-        f"Warren seeded once ({warren['golden_seconds']:.0f}s for the golden), then each further "
-        f"world cost {warren['per_clone_seconds']:.2f}s.",
+        f"Binky seeded once ({binky['golden_seconds']:.0f}s for the golden), then each further "
+        f"world cost {binky['per_clone_seconds']:.2f}s.",
     ]
     return "\n".join(lines)
 
@@ -219,15 +219,15 @@ def sweep_report(rows: int, points: list[tuple[int, dict, dict]]) -> str:
     lines = [
         f"### Cost of one more parallel world · {rows:,} rows each · {IMAGE}",
         "",
-        "| worlds | RAM: a container each | RAM: Warren | disk: a container each "
-        "| disk: Warren | time: a container each | time: Warren |",
+        "| worlds | RAM: a container each | RAM: Binky | disk: a container each "
+        "| disk: Binky | time: a container each | time: Binky |",
         "| ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
-    for n, solo, warren in points:
+    for n, solo, binky in points:
         lines.append(
-            f"| {n} | {solo['ram_mib']:.0f} MiB | {warren['ram_mib']:.0f} MiB "
-            f"| {solo['disk_mib']:.0f} MiB | {warren['disk_mib']:.0f} MiB "
-            f"| {solo['seconds']:.0f}s | {warren['seconds']:.0f}s |"
+            f"| {n} | {solo['ram_mib']:.0f} MiB | {binky['ram_mib']:.0f} MiB "
+            f"| {solo['disk_mib']:.0f} MiB | {binky['disk_mib']:.0f} MiB "
+            f"| {solo['seconds']:.0f}s | {binky['seconds']:.0f}s |"
         )
     if len(points) >= 2:
         (n0, s0, w0), (n1, s1, w1) = points[0], points[-1]
@@ -239,15 +239,15 @@ def sweep_report(rows: int, points: list[tuple[int, dict, dict]]) -> str:
             f"- a container each: **+{(s1['ram_mib'] - s0['ram_mib']) / span:.0f} MiB RAM**, "
             f"**+{(s1['disk_mib'] - s0['disk_mib']) / span:.0f} MiB disk**, "
             f"**+{(s1['seconds'] - s0['seconds']) / span:.1f}s**",
-            f"- Warren: **+{(w1['ram_mib'] - w0['ram_mib']) / span:.0f} MiB RAM**, "
+            f"- Binky: **+{(w1['ram_mib'] - w0['ram_mib']) / span:.0f} MiB RAM**, "
             f"**+{(w1['disk_mib'] - w0['disk_mib']) / span:.0f} MiB disk**, "
             f"**+{(w1['seconds'] - w0['seconds']) / span:.1f}s**",
             "",
-            "Read the first row before the last one. At one world Warren is *behind* — it "
+            "Read the first row before the last one. At one world Binky is *behind* — it "
             "pays for a server plus a golden template nobody is using yet. It buys that back "
             "on the second world and never gives it up. Disk is the axis it does not win: "
             "`CREATE DATABASE ... TEMPLATE` is a file copy, not copy-on-write, so every world "
-            "is still a full copy of the data. What Warren removes is the *server* per world, "
+            "is still a full copy of the data. What Binky removes is the *server* per world, "
             "not the *bytes* per world.",
         ]
     return "\n".join(lines)
@@ -256,7 +256,7 @@ def sweep_report(rows: int, points: list[tuple[int, dict, dict]]) -> str:
 def measure(worlds: int, rows: int) -> tuple[dict, dict]:
     cleanup()
     try:
-        return arm_containers(worlds, rows), arm_warren(worlds, rows)
+        return arm_containers(worlds, rows), arm_binky(worlds, rows)
     finally:
         cleanup()
 
@@ -280,22 +280,22 @@ def main() -> int:
         points = []
         for n in counts:
             print(f"  measuring {n} world(s)...", file=sys.stderr)
-            solo, warren = measure(n, args.rows)
-            points.append((n, solo, warren))
+            solo, binky = measure(n, args.rows)
+            points.append((n, solo, binky))
         print(sweep_report(args.rows, points))
         if args.json:
             print()
             print(json.dumps(
-                [{"worlds": n, "container_per_worktree": s, "warren": w} for n, s, w in points],
+                [{"worlds": n, "container_per_worktree": s, "binky": w} for n, s, w in points],
                 indent=2,
             ))
         return 0
 
-    solo, warren = measure(args.worlds, args.rows)
-    print(report(args.worlds, args.rows, solo, warren))
+    solo, binky = measure(args.worlds, args.rows)
+    print(report(args.worlds, args.rows, solo, binky))
     if args.json:
         print()
-        print(json.dumps({"container_per_worktree": solo, "warren": warren}, indent=2))
+        print(json.dumps({"container_per_worktree": solo, "binky": binky}, indent=2))
     return 0
 
 

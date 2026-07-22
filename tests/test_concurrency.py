@@ -8,8 +8,8 @@ writes don't corrupt, and port allocation never hands out the same port twice.
 import threading
 from pathlib import Path
 
-from warren import allocator
-from warren.registry import Registry, WorktreeStatus
+from binky import allocator
+from binky.registry import Registry, WorktreeStatus
 
 
 def _run_all(target, args_list: list[tuple]) -> list:
@@ -32,7 +32,7 @@ def _run_all(target, args_list: list[tuple]) -> list:
 
 def test_registry_concurrent_writes(tmp_path: Path) -> None:
     """Many threads writing at once (own connection each) never corrupt or lose rows."""
-    reg = Registry.connect(tmp_path / "warren.db")
+    reg = Registry.connect(tmp_path / "binky.db")
     n = 24
 
     def worker(i: int) -> None:
@@ -56,7 +56,7 @@ def test_allocator_no_collision_under_contention(tmp_path: Path) -> None:
     the ports committed before it. A plain deferred `BEGIN` would race the snapshot
     (and deadlock on lock upgrade) instead.
     """
-    reg = Registry.connect(tmp_path / "warren.db")
+    reg = Registry.connect(tmp_path / "binky.db")
     workers = [
         (reg.create_worktree("proj", f"wt{i}", f"/p/{i}", f"b{i}").id, f"wt{i}")
         for i in range(16)

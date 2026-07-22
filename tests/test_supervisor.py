@@ -7,7 +7,7 @@ import sys
 import time
 from pathlib import Path
 
-from warren.supervisor import _GIVE_UP_AFTER, ProcessManager
+from binky.supervisor import _GIVE_UP_AFTER, ProcessManager
 
 
 def _script(tmp_path: Path, name: str, body: str) -> str:

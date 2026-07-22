@@ -6,7 +6,7 @@ Two layers:
   the config plumbing. These are the parts that silently corrupt state when wrong
   (two slices collapsing onto one identifier), so they get tested without a server.
 - **gated on a real server** — one full provision → resolve → clone → teardown
-  round-trip per backend, skipped unless the matching ``WARREN_TEST_*`` env var
+  round-trip per backend, skipped unless the matching ``BINKY_TEST_*`` env var
   points at one. CI sets them from service containers.
 """
 
@@ -16,8 +16,8 @@ import os
 
 import pytest
 
-from warren import adapters, ops
-from warren.builtin_adapters import (
+from binky import adapters, ops
+from binky.builtin_adapters import (
     ClickHouseAdapter,
     ElasticsearchAdapter,
     KafkaAdapter,
@@ -29,7 +29,7 @@ from warren.builtin_adapters import (
     S3Adapter,
     _fit,
 )
-from warren.config import load_config_data
+from binky.config import load_config_data
 
 
 # --------------------------------------------------------------------------- #
@@ -61,7 +61,7 @@ def test_protocol_compatible_aliases_resolve_to_one_implementation(
 def test_lazy_load_does_not_need_the_driver_installed() -> None:
     """Constructing an adapter must not import its driver — only using it should.
 
-    This is what lets `warren status` work on a machine with no boto3, and what
+    This is what lets `binky status` work on a machine with no boto3, and what
     makes the missing-extra error land at the point the user can act on it.
     """
     adapter = adapters.get("s3", {"admin_url": "http://localhost:9000"})
@@ -79,8 +79,8 @@ def test_adapter_versions_are_accepted() -> None:
      ("rabbitmq", "management API"), ("kafka", "admin_url")],
 )
 def test_missing_admin_url_is_a_clear_error(name: str, hint: str, monkeypatch) -> None:
-    for var in ("WARREN_REDIS_URL", "WARREN_MYSQL_URL", "WARREN_MONGO_URL",
-                "WARREN_RABBITMQ_URL", "WARREN_KAFKA_URL"):
+    for var in ("BINKY_REDIS_URL", "BINKY_MYSQL_URL", "BINKY_MONGO_URL",
+                "BINKY_RABBITMQ_URL", "BINKY_KAFKA_URL"):
         monkeypatch.delenv(var, raising=False)
     with pytest.raises(adapters.AdapterError, match=hint):
         adapters.get(name, {})
@@ -99,7 +99,7 @@ def test_missing_driver_names_the_extra_to_install(monkeypatch) -> None:
         return real(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", blocked)
-    with pytest.raises(adapters.AdapterError, match=r"warren\[mongodb\]"):
+    with pytest.raises(adapters.AdapterError, match=r"binky\[mongodb\]"):
         adapter.provision("acme_feat")
 
 
@@ -116,7 +116,7 @@ def test_fit_never_collapses_two_names_onto_one() -> None:
 
 def test_s3_bucket_names_obey_s3_rules() -> None:
     assert S3Adapter._bucket("acme_feat_login") == "acme-feat-login"
-    assert S3Adapter._bucket("ab") == "warren-ab"  # padded past S3's 3-char floor
+    assert S3Adapter._bucket("ab") == "binky-ab"  # padded past S3's 3-char floor
     assert S3Adapter._bucket("a_b") == "a-b"  # already legal, left alone
     long_name = S3Adapter._bucket("acme_" + "x" * 100)
     assert len(long_name) <= 63
@@ -201,7 +201,7 @@ def test_elasticsearch_address_carries_the_index_prefix() -> None:
 
 def test_clickhouse_credentials_travel_as_a_header_not_in_the_url() -> None:
     """Userinfo in a request line leaks into logs and proxy access lines."""
-    from warren.builtin_adapters import _split_auth
+    from binky.builtin_adapters import _split_auth
 
     root, headers = _split_auth("http://default:s3cret@localhost:8123")
     assert root == "http://localhost:8123"
@@ -270,7 +270,7 @@ def test_options_cannot_shadow_admin_url() -> None:
 
 
 def test_options_are_rejected_on_a_process_service() -> None:
-    from warren.config import ConfigError
+    from binky.config import ConfigError
 
     with pytest.raises(ConfigError, match="only valid on an adapter"):
         load_config_data(
@@ -303,19 +303,19 @@ def _roundtrip(adapter, slice_name: str, *, clone: bool) -> None:
     adapter.teardown(slice_name)  # idempotent
 
 
-SLICE = "warren_test_slice_zzz"
+SLICE = "binky_test_slice_zzz"
 
 
-@pytest.mark.skipif(not os.environ.get("WARREN_TEST_REDIS"), reason="set WARREN_TEST_REDIS")
+@pytest.mark.skipif(not os.environ.get("BINKY_TEST_REDIS"), reason="set BINKY_TEST_REDIS")
 def test_redis_roundtrip() -> None:
-    adapter = adapters.get("redis", {"admin_url": os.environ["WARREN_TEST_REDIS"]})
+    adapter = adapters.get("redis", {"admin_url": os.environ["BINKY_TEST_REDIS"]})
     _roundtrip(adapter, SLICE, clone=True)
 
 
-@pytest.mark.skipif(not os.environ.get("WARREN_TEST_REDIS"), reason="set WARREN_TEST_REDIS")
+@pytest.mark.skipif(not os.environ.get("BINKY_TEST_REDIS"), reason="set BINKY_TEST_REDIS")
 def test_redis_reports_the_logical_database_cap() -> None:
     """The 16-DB ceiling must surface as a clear error, not a silent collision."""
-    url = os.environ["WARREN_TEST_REDIS"]
+    url = os.environ["BINKY_TEST_REDIS"]
     adapter = adapters.get("redis", {"admin_url": url, "databases": "3"})
     claimed = [f"{SLICE}_cap_{i}" for i in range(2)]
     try:
@@ -328,66 +328,66 @@ def test_redis_reports_the_logical_database_cap() -> None:
             adapter.teardown(name)
 
 
-@pytest.mark.skipif(not os.environ.get("WARREN_TEST_MYSQL"), reason="set WARREN_TEST_MYSQL")
+@pytest.mark.skipif(not os.environ.get("BINKY_TEST_MYSQL"), reason="set BINKY_TEST_MYSQL")
 def test_mysql_roundtrip() -> None:
-    adapter = adapters.get("mysql", {"admin_url": os.environ["WARREN_TEST_MYSQL"]})
+    adapter = adapters.get("mysql", {"admin_url": os.environ["BINKY_TEST_MYSQL"]})
     _roundtrip(adapter, SLICE, clone=adapter.capabilities()["clone"])
 
 
-@pytest.mark.skipif(not os.environ.get("WARREN_TEST_MONGO"), reason="set WARREN_TEST_MONGO")
+@pytest.mark.skipif(not os.environ.get("BINKY_TEST_MONGO"), reason="set BINKY_TEST_MONGO")
 def test_mongodb_roundtrip() -> None:
-    adapter = adapters.get("mongodb", {"admin_url": os.environ["WARREN_TEST_MONGO"]})
+    adapter = adapters.get("mongodb", {"admin_url": os.environ["BINKY_TEST_MONGO"]})
     _roundtrip(adapter, SLICE, clone=True)
 
 
-@pytest.mark.skipif(not os.environ.get("WARREN_TEST_S3"), reason="set WARREN_TEST_S3")
+@pytest.mark.skipif(not os.environ.get("BINKY_TEST_S3"), reason="set BINKY_TEST_S3")
 def test_s3_roundtrip() -> None:
     adapter = adapters.get(
         "s3",
         {
-            "admin_url": os.environ["WARREN_TEST_S3"],
-            "access_key": os.environ.get("WARREN_TEST_S3_KEY"),
-            "secret_key": os.environ.get("WARREN_TEST_S3_SECRET"),
+            "admin_url": os.environ["BINKY_TEST_S3"],
+            "access_key": os.environ.get("BINKY_TEST_S3_KEY"),
+            "secret_key": os.environ.get("BINKY_TEST_S3_SECRET"),
             "buckets": ["uploads"],
         },
     )
     _roundtrip(adapter, SLICE, clone=True)
 
 
-@pytest.mark.skipif(not os.environ.get("WARREN_TEST_RABBITMQ"), reason="set WARREN_TEST_RABBITMQ")
+@pytest.mark.skipif(not os.environ.get("BINKY_TEST_RABBITMQ"), reason="set BINKY_TEST_RABBITMQ")
 def test_rabbitmq_roundtrip() -> None:
-    adapter = adapters.get("rabbitmq", {"admin_url": os.environ["WARREN_TEST_RABBITMQ"]})
+    adapter = adapters.get("rabbitmq", {"admin_url": os.environ["BINKY_TEST_RABBITMQ"]})
     _roundtrip(adapter, SLICE, clone=False)
 
 
-@pytest.mark.skipif(not os.environ.get("WARREN_TEST_KAFKA"), reason="set WARREN_TEST_KAFKA")
+@pytest.mark.skipif(not os.environ.get("BINKY_TEST_KAFKA"), reason="set BINKY_TEST_KAFKA")
 def test_kafka_roundtrip() -> None:
     adapter = adapters.get(
-        "kafka", {"admin_url": os.environ["WARREN_TEST_KAFKA"], "topics": "orders,events"}
+        "kafka", {"admin_url": os.environ["BINKY_TEST_KAFKA"], "topics": "orders,events"}
     )
     _roundtrip(adapter, SLICE, clone=False)
 
 
-@pytest.mark.skipif(not os.environ.get("WARREN_TEST_QDRANT"), reason="set WARREN_TEST_QDRANT")
+@pytest.mark.skipif(not os.environ.get("BINKY_TEST_QDRANT"), reason="set BINKY_TEST_QDRANT")
 def test_qdrant_roundtrip() -> None:
-    adapter = adapters.get("qdrant", {"admin_url": os.environ["WARREN_TEST_QDRANT"]})
+    adapter = adapters.get("qdrant", {"admin_url": os.environ["BINKY_TEST_QDRANT"]})
     _roundtrip(adapter, SLICE, clone=False)
 
 
 @pytest.mark.skipif(
-    not os.environ.get("WARREN_TEST_CLICKHOUSE"), reason="set WARREN_TEST_CLICKHOUSE"
+    not os.environ.get("BINKY_TEST_CLICKHOUSE"), reason="set BINKY_TEST_CLICKHOUSE"
 )
 def test_clickhouse_roundtrip() -> None:
-    adapter = adapters.get("clickhouse", {"admin_url": os.environ["WARREN_TEST_CLICKHOUSE"]})
+    adapter = adapters.get("clickhouse", {"admin_url": os.environ["BINKY_TEST_CLICKHOUSE"]})
     _roundtrip(adapter, SLICE, clone=False)
 
 
 @pytest.mark.skipif(
-    not os.environ.get("WARREN_TEST_CLICKHOUSE"), reason="set WARREN_TEST_CLICKHOUSE"
+    not os.environ.get("BINKY_TEST_CLICKHOUSE"), reason="set BINKY_TEST_CLICKHOUSE"
 )
 def test_clickhouse_database_really_appears_and_disappears() -> None:
     """The round-trip proves the calls succeed; this proves they did something."""
-    adapter = adapters.get("clickhouse", {"admin_url": os.environ["WARREN_TEST_CLICKHOUSE"]})
+    adapter = adapters.get("clickhouse", {"admin_url": os.environ["BINKY_TEST_CLICKHOUSE"]})
     exists = f"SELECT count() FROM system.databases WHERE name = '{SLICE}'"
     try:
         adapter.provision(SLICE)
@@ -402,25 +402,25 @@ def test_clickhouse_database_really_appears_and_disappears() -> None:
 
 
 @pytest.mark.skipif(
-    not os.environ.get("WARREN_TEST_ELASTICSEARCH"), reason="set WARREN_TEST_ELASTICSEARCH"
+    not os.environ.get("BINKY_TEST_ELASTICSEARCH"), reason="set BINKY_TEST_ELASTICSEARCH"
 )
 def test_elasticsearch_roundtrip() -> None:
     adapter = adapters.get(
         "elasticsearch",
-        {"admin_url": os.environ["WARREN_TEST_ELASTICSEARCH"], "indices": "products,orders"},
+        {"admin_url": os.environ["BINKY_TEST_ELASTICSEARCH"], "indices": "products,orders"},
     )
     _roundtrip(adapter, SLICE, clone=False)
 
 
 @pytest.mark.skipif(
-    not os.environ.get("WARREN_TEST_ELASTICSEARCH"), reason="set WARREN_TEST_ELASTICSEARCH"
+    not os.environ.get("BINKY_TEST_ELASTICSEARCH"), reason="set BINKY_TEST_ELASTICSEARCH"
 )
 def test_elasticsearch_teardown_spares_a_sibling_slice() -> None:
     """Live proof of the prefix-overlap guarantee the unit test asserts on names.
 
-    `warren_test_slice_zzz` tearing down must not touch `warren_test_slice_zzz_2`.
+    `binky_test_slice_zzz` tearing down must not touch `binky_test_slice_zzz_2`.
     """
-    url = os.environ["WARREN_TEST_ELASTICSEARCH"]
+    url = os.environ["BINKY_TEST_ELASTICSEARCH"]
     config = {"admin_url": url, "indices": "products"}
     adapter = adapters.get("elasticsearch", config)
     sibling = SLICE + "_2"

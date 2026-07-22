@@ -1,8 +1,8 @@
 """The agent substrate: `expose` publishes a worktree's live coordinates, and
 `verify` runs the project's checks against it and records a pass/fail verdict.
 
-Warren stays the substrate — `verify` is a gate a driver calls at *its* done moment,
-not something Warren triggers by watching an agent.
+Binky stays the substrate — `verify` is a gate a driver calls at *its* done moment,
+not something Binky triggers by watching an agent.
 """
 
 import contextlib
@@ -13,8 +13,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from warren import daemon, ipc, ops
-from warren.config import load_config_data
+from binky import daemon, ipc, ops
+from binky.config import load_config_data
 
 
 # --- unit: the exposed-coordinates map (no daemon) ------------------------- #
@@ -43,8 +43,8 @@ def test_exposed_default_is_empty() -> None:
 # --- e2e: verify + env through the daemon ---------------------------------- #
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("WARREN_PROXY_PORT", "0")
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_PROXY_PORT", "0")
     yield
     with contextlib.suppress(Exception):
         daemon.stop(timeout=5)
@@ -62,7 +62,7 @@ def _project(tmp_path: Path, *, verify_ok: bool = True, expose: list[str] | None
         f"import sys\nsys.exit({0 if verify_ok else 1})\n", encoding="utf-8"
     )
     expose_line = f"expose = {expose!r}\n" if expose is not None else ""
-    (proj / "warren.toml").write_text(
+    (proj / "binky.toml").write_text(
         '[project]\nname = "demo"\n'
         '[services.web]\n'
         f"cmd = '\"{py}\" -m http.server ${{self.port}}'\n"

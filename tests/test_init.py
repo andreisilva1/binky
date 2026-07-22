@@ -1,13 +1,13 @@
-"""`warren init` — the generated file must always be valid, and never hold a secret."""
+"""`binky init` — the generated file must always be valid, and never hold a secret."""
 
 from __future__ import annotations
 
 import pytest
 from typer.testing import CliRunner
 
-from warren.cli import app
-from warren.config import load_config, security_warnings
-from warren.init_cmd import InitError, adapter_for, env_keys, generate
+from binky.cli import app
+from binky.config import load_config, security_warnings
+from binky.init_cmd import InitError, adapter_for, env_keys, generate
 
 runner = CliRunner()
 
@@ -50,10 +50,10 @@ def project(tmp_path):
 # --------------------------------------------------------------------------- #
 #  the generated file is always usable
 # --------------------------------------------------------------------------- #
-def test_the_generated_toml_is_valid_warren_config(project):
+def test_the_generated_toml_is_valid_binky_config(project):
     result = generate(project)
-    write(project, "warren.toml", result.toml)
-    cfg = load_config(project / "warren.toml")
+    write(project, "binky.toml", result.toml)
+    cfg = load_config(project / "binky.toml")
 
     assert cfg.services["db"].adapter == "postgres"
     assert cfg.services["cache"].adapter == "redis"
@@ -64,27 +64,27 @@ def test_the_generated_toml_is_valid_warren_config(project):
 def test_a_service_without_a_command_is_commented_out_not_guessed(project):
     """A guessed `cmd` would produce a file that looks right and doesn't run."""
     result = generate(project)
-    write(project, "warren.toml", result.toml)
+    write(project, "binky.toml", result.toml)
 
     # `worker` builds from source and declares no command — it must not appear as
     # a live service, but the file must still parse.
-    cfg = load_config(project / "warren.toml")
+    cfg = load_config(project / "binky.toml")
     assert "worker" not in cfg.services
     assert "# [services.worker]" in result.toml
     assert any("worker" in note and "TODO" in note for note in result.notes)
 
 
-def test_ports_are_not_carried_over_because_warren_allocates_them(project):
+def test_ports_are_not_carried_over_because_binky_allocates_them(project):
     result = generate(project)
     assert "3000" not in result.toml
     assert "5432:5432" not in result.toml
-    write(project, "warren.toml", result.toml)
-    assert load_config(project / "warren.toml").services["web"].url == "web"
+    write(project, "binky.toml", result.toml)
+    assert load_config(project / "binky.toml").services["web"].url == "web"
 
 
 def test_process_services_are_wired_to_the_adapters_they_depend_on(project):
-    write(project, "warren.toml", generate(project).toml)
-    web = load_config(project / "warren.toml").services["web"]
+    write(project, "binky.toml", generate(project).toml)
+    web = load_config(project / "binky.toml").services["web"]
     assert web.env == {"DB_URL": "${db.url}", "CACHE_URL": "${cache.url}"}
 
 
@@ -144,8 +144,8 @@ def test_the_report_says_what_it_dropped(tmp_path):
 
 
 def test_the_generated_file_raises_no_security_warnings(project):
-    write(project, "warren.toml", generate(project).toml)
-    assert security_warnings(load_config(project / "warren.toml")) == []
+    write(project, "binky.toml", generate(project).toml)
+    assert security_warnings(load_config(project / "binky.toml")) == []
 
 
 # --------------------------------------------------------------------------- #
@@ -193,8 +193,8 @@ services:
 """,
     )
     result = generate(tmp_path)
-    write(tmp_path, "warren.toml", result.toml)
-    assert load_config(tmp_path / "warren.toml").services["db"].adapter == "postgres"
+    write(tmp_path, "binky.toml", result.toml)
+    assert load_config(tmp_path / "binky.toml").services["db"].adapter == "postgres"
 
 
 def test_a_command_given_as_a_list_is_joined(tmp_path):
@@ -203,14 +203,14 @@ def test_a_command_given_as_a_list_is_joined(tmp_path):
         "compose.yaml",
         'services:\n  web:\n    build: .\n    command: ["python", "-m", "app"]\n',
     )
-    write(tmp_path, "warren.toml", generate(tmp_path).toml)
-    assert load_config(tmp_path / "warren.toml").services["web"].cmd == "python -m app"
+    write(tmp_path, "binky.toml", generate(tmp_path).toml)
+    assert load_config(tmp_path / "binky.toml").services["web"].cmd == "python -m app"
 
 
 def test_service_names_with_dashes_become_valid_identifiers(tmp_path):
     write(tmp_path, "compose.yml", "services:\n  my-api-db:\n    image: postgres:16\n")
-    write(tmp_path, "warren.toml", generate(tmp_path).toml)
-    assert "my_api_db" in load_config(tmp_path / "warren.toml").services
+    write(tmp_path, "binky.toml", generate(tmp_path).toml)
+    assert "my_api_db" in load_config(tmp_path / "binky.toml").services
 
 
 # --------------------------------------------------------------------------- #
@@ -239,25 +239,25 @@ def test_a_compose_file_without_services_is_rejected(tmp_path):
 def test_init_writes_the_file_and_reports(project):
     result = runner.invoke(app, ["init", str(project)])
     assert result.exit_code == 0, result.output
-    assert (project / "warren.toml").exists()
+    assert (project / "binky.toml").exists()
     assert "wrote" in result.output
 
 
 def test_init_refuses_to_clobber_an_existing_config(project):
-    write(project, "warren.toml", "# mine\n")
+    write(project, "binky.toml", "# mine\n")
     result = runner.invoke(app, ["init", str(project)])
 
     assert result.exit_code == 1
     assert "already exists" in result.output
-    assert (project / "warren.toml").read_text(encoding="utf-8") == "# mine\n"
+    assert (project / "binky.toml").read_text(encoding="utf-8") == "# mine\n"
 
 
 def test_force_overwrites(project):
-    write(project, "warren.toml", "# mine\n")
+    write(project, "binky.toml", "# mine\n")
     result = runner.invoke(app, ["init", str(project), "--force"])
 
     assert result.exit_code == 0, result.output
-    assert "# mine" not in (project / "warren.toml").read_text(encoding="utf-8")
+    assert "# mine" not in (project / "binky.toml").read_text(encoding="utf-8")
 
 
 def test_init_exits_nonzero_when_there_is_nothing_to_read(tmp_path):

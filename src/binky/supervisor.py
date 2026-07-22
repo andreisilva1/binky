@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from warren.config import Limits
+    from binky.config import Limits
 
 # restart backoff + give-up thresholds (seconds / counts)
 _BACKOFF_BASE = 0.5

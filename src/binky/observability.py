@@ -2,10 +2,10 @@
 
 Two cheap, high-value observability surfaces (no metrics-server slop):
 
-- ``log_event`` appends one JSON object per line to ``$WARREN_HOME/events.log`` —
+- ``log_event`` appends one JSON object per line to ``$BINKY_HOME/events.log`` —
   greppable and ingestible by any log pipeline.
-- ``collect_metrics`` returns a point-in-time snapshot for ``warren metrics`` /
-  ``warren doctor``.
+- ``collect_metrics`` returns a point-in-time snapshot for ``binky metrics`` /
+  ``binky doctor``.
 """
 
 from __future__ import annotations
@@ -15,14 +15,14 @@ import json
 import time
 from collections import Counter
 
-from warren import paths
+from binky import paths
 
 # roll events.log at this size, keeping one previous generation (events.log.1)
 MAX_EVENTS_BYTES = 5 * 1024 * 1024
 
 
 def events_path():
-    return paths.warren_home() / "events.log"
+    return paths.binky_home() / "events.log"
 
 
 def _rotate_if_big(path) -> None:

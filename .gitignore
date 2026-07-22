@@ -2,6 +2,11 @@
 # lives here — kept locally, never committed.
 development/
 
+# Secrets. Never commit these — the PyPI token lives here.
+.env
+.env.*
+!.env.example
+
 # Python
 __pycache__/
 *.py[cod]

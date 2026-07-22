@@ -1,4 +1,4 @@
-"""A tiny HTTP server that binds the port Warren injected as $PORT."""
+"""A tiny HTTP server that binds the port Binky injected as $PORT."""
 
 import http.server
 import os

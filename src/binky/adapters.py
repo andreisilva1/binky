@@ -13,11 +13,11 @@ Two tiers implement the *same* contract:
 - **in-process** (this file) — first-party adapters shipped in the repo as Python
   classes, discovered by name. Lowest friction to contribute; tested in CI.
 - **external** (:class:`ExternalAdapter`) — any-language executables the community
-  writes without patching Warren, driven over a one-shot subprocess + JSON protocol.
-  A Python author gets the protocol for free via ``warren.adapter_sdk``.
+  writes without patching Binky, driven over a one-shot subprocess + JSON protocol.
+  A Python author gets the protocol for free via ``binky.adapter_sdk``.
 
 Discovery: a service's ``adapter`` name is looked up in the in-process registry
-first; if absent, Warren looks for ``warren-adapter-<name>`` on ``PATH``.
+first; if absent, Binky looks for ``binky-adapter-<name>`` on ``PATH``.
 """
 
 from __future__ import annotations
@@ -64,7 +64,7 @@ class Adapter(ABC):
 # --------------------------------------------------------------------------- #
 #  external tier — the JSON protocol
 # --------------------------------------------------------------------------- #
-# Warren invokes ``<binary> <op>`` (op ∈ provision|resolve|teardown|capabilities),
+# Binky invokes ``<binary> <op>`` (op ∈ provision|resolve|teardown|capabilities),
 # writes a JSON request on stdin, and reads a JSON response on stdout:
 #   request:  {"slice": "<slice>", "config": {...}}
 #   response: {"ok": true, ...}  |  {"ok": false, "error": "<msg>"}
@@ -122,7 +122,7 @@ class ExternalAdapter(Adapter):
 _REGISTRY: dict[str, type[Adapter]] = {}
 
 # First-party adapters living in `builtin_adapters`. They are imported on first use,
-# not at import time, so `import warren` stays free of boto3/pymongo/... and a missing
+# not at import time, so `import binky` stays free of boto3/pymongo/... and a missing
 # extra fails where the user can act on it — with the exact `pip install` to run.
 # Several names map to one class: those backends are protocol-compatible forks or
 # share an API, so the slice and the code are genuinely identical.
@@ -150,7 +150,7 @@ def register(name: str, cls: type[Adapter]) -> None:
 
 
 def available() -> list[str]:
-    """Every adapter name Warren can resolve without leaving the process."""
+    """Every adapter name Binky can resolve without leaving the process."""
     return sorted(set(_REGISTRY) | set(_LAZY))
 
 
@@ -161,7 +161,7 @@ def _load(name: str) -> type[Adapter] | None:
     attr = _LAZY.get(name)
     if attr is None:
         return None
-    module = importlib.import_module("warren.builtin_adapters")
+    module = importlib.import_module("binky.builtin_adapters")
     cls = getattr(module, attr)
     _REGISTRY[name] = cls
     return cls
@@ -171,13 +171,13 @@ def get(spec: str, config: dict) -> Adapter:
     """Resolve an adapter spec like ``postgres@16`` to an instance (version ignored).
 
     In-process first-party adapters win; otherwise an external
-    ``warren-adapter-<name>`` executable on PATH is driven over the JSON protocol.
+    ``binky-adapter-<name>`` executable on PATH is driven over the JSON protocol.
     """
     name = spec.split("@", 1)[0]
     cls = _load(name)
     if cls is not None:
         return cls(config)
-    binary = shutil.which(f"warren-adapter-{name}")
+    binary = shutil.which(f"binky-adapter-{name}")
     if binary:
         return ExternalAdapter(config, [binary])
     raise AdapterError(f"unknown adapter: {name}")
@@ -202,15 +202,15 @@ class PostgresAdapter(Adapter):
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
-        self.admin_url = config.get("admin_url") or os.environ.get("WARREN_DB_ADMIN_URL")
+        self.admin_url = config.get("admin_url") or os.environ.get("BINKY_DB_ADMIN_URL")
         if not self.admin_url:
-            raise AdapterError("postgres adapter needs an admin_url (or $WARREN_DB_ADMIN_URL)")
+            raise AdapterError("postgres adapter needs an admin_url (or $BINKY_DB_ADMIN_URL)")
 
     def _connect(self):
         try:
             import psycopg
         except ImportError as exc:  # pragma: no cover — exercised only without the extra installed
-            raise AdapterError("psycopg not installed — `pip install 'warren[postgres]'`") from exc
+            raise AdapterError("psycopg not installed — `pip install 'binky[postgres]'`") from exc
         return psycopg.connect(self.admin_url, autocommit=True)
 
     def provision(self, slice_name: str) -> None:

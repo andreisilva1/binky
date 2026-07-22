@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from warren import daemon, ipc, paths
+from binky import daemon, ipc, paths
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -20,8 +20,8 @@ def _git(cwd: Path, *args: str) -> None:
 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("WARREN_PROXY_PORT", "0")  # no proxy unless a test opts in
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_PROXY_PORT", "0")  # no proxy unless a test opts in
     yield
     with contextlib.suppress(Exception):
         daemon.stop(timeout=5)
@@ -31,11 +31,11 @@ def _make_project(tmp_path: Path) -> Path:
     proj = tmp_path / "proj"
     proj.mkdir()
     (proj / "sleeper.py").write_text(
-        "import time\nprint('hello from warren', flush=True)\ntime.sleep(15)\n", encoding="utf-8"
+        "import time\nprint('hello from binky', flush=True)\ntime.sleep(15)\n", encoding="utf-8"
     )
     py = sys.executable
     # single-quoted TOML literal strings so Windows backslashes stay literal
-    (proj / "warren.toml").write_text(
+    (proj / "binky.toml").write_text(
         '[project]\n'
         'name = "demo"\n'
         '[services.sleeper]\n'
@@ -66,7 +66,7 @@ def test_up_status_down(tmp_path: Path) -> None:
     # a real git worktree was provisioned for the branch
     wt_dir = paths.worktrees_dir() / "demo" / "feat"
     assert wt_dir.exists()
-    assert (wt_dir / "warren.toml").exists()
+    assert (wt_dir / "binky.toml").exists()
 
     feat = next(w for w in ipc.call("status")["worktrees"] if w["worktree"] == "feat")
     assert feat["running"] is True
@@ -138,7 +138,7 @@ def test_live_gc_after_service_exits(tmp_path: Path) -> None:
     proj.mkdir()
     (proj / "run.py").write_text("import time\ntime.sleep(2)\n", encoding="utf-8")
     py = sys.executable
-    (proj / "warren.toml").write_text(
+    (proj / "binky.toml").write_text(
         '[project]\nname = "sl"\n'
         '[services.job]\n'
         f"cmd = '\"{py}\" run.py'\n"
@@ -177,7 +177,7 @@ def test_unhealthy_aborts(tmp_path: Path) -> None:
     proj.mkdir()
     (proj / "sleeper.py").write_text("import time\ntime.sleep(15)\n", encoding="utf-8")
     py = sys.executable
-    (proj / "warren.toml").write_text(
+    (proj / "binky.toml").write_text(
         '[project]\nname = "bad"\n'
         '[services.web]\n'
         f"cmd = '\"{py}\" sleeper.py'\n"  # never binds its port
@@ -200,7 +200,7 @@ def test_dependency_cycle(tmp_path: Path) -> None:
     daemon.start(timeout=20)
     proj = tmp_path / "cyc"
     proj.mkdir()
-    (proj / "warren.toml").write_text(
+    (proj / "binky.toml").write_text(
         '[project]\nname = "cyc"\n'
         '[services.a]\ncmd = "echo x"\ndepends_on = ["b"]\n'
         '[services.b]\ncmd = "echo x"\ndepends_on = ["a"]\n',
@@ -217,7 +217,7 @@ def test_up_requires_git(tmp_path: Path) -> None:
     daemon.start(timeout=20)
     proj = tmp_path / "nogit"
     proj.mkdir()
-    (proj / "warren.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
+    (proj / "binky.toml").write_text('[project]\nname = "x"\n', encoding="utf-8")
     with pytest.raises(ipc.RpcError, match="not a git repository"):
         ipc.call("up", {"root": str(proj), "worktree": "feat"})
 
@@ -230,11 +230,11 @@ def test_logs_captured(tmp_path: Path) -> None:
 
     deadline = time.monotonic() + 5
     while time.monotonic() < deadline:
-        if log.exists() and "hello from warren" in log.read_text(encoding="utf-8", errors="ignore"):
+        if log.exists() and "hello from binky" in log.read_text(encoding="utf-8", errors="ignore"):
             break
         time.sleep(0.1)
     assert log.exists()
-    assert "hello from warren" in log.read_text(encoding="utf-8", errors="ignore")
+    assert "hello from binky" in log.read_text(encoding="utf-8", errors="ignore")
 
 
 def test_proxy_routes_by_host(tmp_path: Path, monkeypatch) -> None:
@@ -242,7 +242,7 @@ def test_proxy_routes_by_host(tmp_path: Path, monkeypatch) -> None:
     probe.bind(("127.0.0.1", 0))
     proxy_port = probe.getsockname()[1]
     probe.close()
-    monkeypatch.setenv("WARREN_PROXY_PORT", str(proxy_port))
+    monkeypatch.setenv("BINKY_PROXY_PORT", str(proxy_port))
 
     daemon.start(timeout=20)
     proj = _make_project(tmp_path)

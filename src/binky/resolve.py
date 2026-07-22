@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import re
 
-from warren.config import Service
+from binky.config import Service
 
 # ports for the whole worktree graph: (service, label) -> port
 PortMap = dict[tuple[str, str], int]
@@ -78,7 +78,7 @@ def build_env(
     addresses: AddressMap | None = None,
 ) -> dict[str, str]:
     """The environment injected into *service*'s processes."""
-    env: dict[str, str] = {"WARREN_WORKTREE": worktree}
+    env: dict[str, str] = {"BINKY_WORKTREE": worktree}
     primary = _primary(ports, service_name)
     if primary is not None:
         env["PORT"] = str(primary)

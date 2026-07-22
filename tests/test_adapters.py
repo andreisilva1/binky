@@ -1,6 +1,6 @@
 """Tests for the resource-adapter contract and its wiring into up/remove.
 
-The Postgres adapter itself only runs with a real server (set ``WARREN_TEST_PG``
+The Postgres adapter itself only runs with a real server (set ``BINKY_TEST_PG``
 to an admin URL); the wiring is proven with an in-process fake adapter.
 """
 
@@ -12,10 +12,10 @@ from typing import ClassVar
 
 import pytest
 
-from warren import adapters, ops, resolve
-from warren.config import load_config_data
-from warren.registry import Registry
-from warren.supervisor import ProcessManager
+from binky import adapters, ops, resolve
+from binky.config import load_config_data
+from binky.registry import Registry
+from binky.supervisor import ProcessManager
 
 _FILESTORE = Path(__file__).resolve().parents[1] / "examples" / "adapters" / "filestore.py"
 
@@ -45,17 +45,17 @@ def _git(cwd: Path, *args: str) -> None:
 
 
 def test_adapter_provision_and_teardown(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
     proj = tmp_path / "proj"
     proj.mkdir()
-    (proj / "warren.toml").write_text(
+    (proj / "binky.toml").write_text(
         '[project]\nname = "acme"\n[services.db]\nadapter = "fake"\n', encoding="utf-8"
     )
     _git(proj, "init", "-q")
     _git(proj, "add", "-A")
     _git(proj, "-c", "user.email=t@e", "-c", "user.name=t", "commit", "-q", "-m", "i")
 
-    reg = Registry.connect(tmp_path / "home" / "warren.db")
+    reg = Registry.connect(tmp_path / "home" / "binky.db")
     pm = ProcessManager()
     try:
         ops.up(reg, pm, {"root": str(proj), "worktree": "feat"})
@@ -82,7 +82,7 @@ def _init_git(proj: Path) -> None:
 
 def test_clone_from_builds_golden_once_then_clones(tmp_path, monkeypatch) -> None:
     """The golden is built once (migrate runs once); each worktree is a clone of it."""
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
     counter = tmp_path / "migrate_runs.txt"
     monkeypatch.setenv("COUNTER", str(counter))
 
@@ -116,7 +116,7 @@ def test_clone_from_builds_golden_once_then_clones(tmp_path, monkeypatch) -> Non
         "import os\nopen(os.environ['COUNTER'], 'a').write('x')\n", encoding="utf-8"
     )
     py = sys.executable
-    (proj / "warren.toml").write_text(
+    (proj / "binky.toml").write_text(
         '[project]\nname = "acme"\n'
         '[services.db]\n'
         'adapter = "clonefake"\n'
@@ -126,7 +126,7 @@ def test_clone_from_builds_golden_once_then_clones(tmp_path, monkeypatch) -> Non
     )
     _init_git(proj)
 
-    reg = Registry.connect(tmp_path / "home" / "warren.db")
+    reg = Registry.connect(tmp_path / "home" / "binky.db")
     pm = ProcessManager()
     try:
         ops.up(reg, pm, {"root": str(proj), "worktree": "a"})
@@ -143,7 +143,7 @@ def test_clone_from_builds_golden_once_then_clones(tmp_path, monkeypatch) -> Non
 
 def test_clone_from_falls_back_when_adapter_cannot_clone(tmp_path, monkeypatch) -> None:
     """`clone_from` on a clone-less adapter degrades to per-worktree provision+migrate."""
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
     counter = tmp_path / "migrate_runs.txt"
     monkeypatch.setenv("COUNTER", str(counter))
 
@@ -153,7 +153,7 @@ def test_clone_from_falls_back_when_adapter_cannot_clone(tmp_path, monkeypatch) 
         "import os\nopen(os.environ['COUNTER'], 'a').write('x')\n", encoding="utf-8"
     )
     py = sys.executable
-    (proj / "warren.toml").write_text(
+    (proj / "binky.toml").write_text(
         '[project]\nname = "acme"\n'
         '[services.db]\n'
         'adapter = "fake"\n'  # FakeAdapter has no clone capability
@@ -163,7 +163,7 @@ def test_clone_from_falls_back_when_adapter_cannot_clone(tmp_path, monkeypatch) 
     )
     _init_git(proj)
 
-    reg = Registry.connect(tmp_path / "home" / "warren.db")
+    reg = Registry.connect(tmp_path / "home" / "binky.db")
     pm = ProcessManager()
     try:
         ops.up(reg, pm, {"root": str(proj), "worktree": "a"})
@@ -180,10 +180,10 @@ def test_clone_from_falls_back_when_the_clone_itself_fails(tmp_path, monkeypatch
 
     `capabilities()` describes the adapter; it cannot know the machine. A client
     binary too old for the server, a missing grant, a full disk — all surface here.
-    The world Warren hands back must still be correct, just built the slow way, and
+    The world Binky hands back must still be correct, just built the slow way, and
     the dest slice must be torn down first so migrate never runs into a half-copy.
     """
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
     counter = tmp_path / "migrate_runs.txt"
     monkeypatch.setenv("COUNTER", str(counter))
 
@@ -216,7 +216,7 @@ def test_clone_from_falls_back_when_the_clone_itself_fails(tmp_path, monkeypatch
         "import os\nopen(os.environ['COUNTER'], 'a').write('x')\n", encoding="utf-8"
     )
     py = sys.executable
-    (proj / "warren.toml").write_text(
+    (proj / "binky.toml").write_text(
         '[project]\nname = "acme"\n'
         '[services.db]\n'
         'adapter = "brokenclone"\n'
@@ -226,7 +226,7 @@ def test_clone_from_falls_back_when_the_clone_itself_fails(tmp_path, monkeypatch
     )
     _init_git(proj)
 
-    reg = Registry.connect(tmp_path / "home" / "warren.db")
+    reg = Registry.connect(tmp_path / "home" / "binky.db")
     pm = ProcessManager()
     try:
         ops.up(reg, pm, {"root": str(proj), "worktree": "a"})  # must not raise
@@ -259,8 +259,8 @@ def test_adapter_address_injected_into_env() -> None:
 
 
 def test_env_token(monkeypatch) -> None:
-    monkeypatch.setenv("WARREN_SECRET", "sekret")
-    assert resolve.resolve("${env.WARREN_SECRET}", "s", {}, "w") == "sekret"
+    monkeypatch.setenv("BINKY_SECRET", "sekret")
+    assert resolve.resolve("${env.BINKY_SECRET}", "s", {}, "w") == "sekret"
 
 
 def test_unknown_adapter() -> None:
@@ -309,11 +309,11 @@ def test_external_adapter_clone(tmp_path) -> None:
 
 
 def test_get_discovers_external_on_path(monkeypatch, tmp_path) -> None:
-    fake_bin = tmp_path / "warren-adapter-thing"
+    fake_bin = tmp_path / "binky-adapter-thing"
     fake_bin.write_text("", encoding="utf-8")
     monkeypatch.setattr(
         adapters.shutil, "which",
-        lambda name: str(fake_bin) if name == "warren-adapter-thing" else None,
+        lambda name: str(fake_bin) if name == "binky-adapter-thing" else None,
     )
     adapter = adapters.get("thing", {})
     assert isinstance(adapter, adapters.ExternalAdapter)
@@ -327,13 +327,13 @@ def test_external_adapter_surfaces_failure() -> None:
         bad.provision("x")
 
 
-PG_URL = os.environ.get("WARREN_TEST_PG")
+PG_URL = os.environ.get("BINKY_TEST_PG")
 
 
-@pytest.mark.skipif(not PG_URL, reason="set WARREN_TEST_PG to a Postgres admin URL to run")
+@pytest.mark.skipif(not PG_URL, reason="set BINKY_TEST_PG to a Postgres admin URL to run")
 def test_postgres_adapter_roundtrip() -> None:
     adapter = adapters.get("postgres", {"admin_url": PG_URL})
-    name = "warren_test_slice_zzz"
+    name = "binky_test_slice_zzz"
     clone = name + "_clone"
     adapter.teardown(name)  # clean slate
     adapter.teardown(clone)

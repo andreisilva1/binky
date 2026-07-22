@@ -5,7 +5,7 @@ registry, so collisions are impossible by construction. Allocation is:
 
 - **deterministic with fallback** — a port derived from ``hash(project:worktree:
   service:label)`` (stable across restarts), falling forward to the next free one;
-- **collision-proof** — skips ports already in the registry (Warren-internal) *and*
+- **collision-proof** — skips ports already in the registry (Binky-internal) *and*
   ports currently bound on the host (external), then records the choice.
 
 The whole set for a worktree is allocated in one registry transaction.
@@ -16,7 +16,7 @@ from __future__ import annotations
 import hashlib
 import socket
 
-from warren.registry import Registry
+from binky.registry import Registry
 
 DEFAULT_RANGE = (4000, 4999)
 

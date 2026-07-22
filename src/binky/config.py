@@ -1,6 +1,6 @@
-"""Parse and validate ``warren.toml`` into typed models.
+"""Parse and validate ``binky.toml`` into typed models.
 
-The whole schema is modelled here (it matches the annotated `warren.toml`).
+The whole schema is modelled here (it matches the annotated `binky.toml`).
 Fields that belong to v2 features (`sync`, `clone_from`,
 `agents`, `replicas`, …) are parsed and validated now so the file format is
 stable — even though the behaviour lands later. Unknown fields are rejected.
@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 
 class ConfigError(Exception):
-    """Raised when a ``warren.toml`` is missing, malformed, or invalid."""
+    """Raised when a ``binky.toml`` is missing, malformed, or invalid."""
 
 
 class _Base(BaseModel):
@@ -159,7 +159,7 @@ class Hooks(_Base):
     pre_down: str | None = None
 
 
-class WarrenConfig(_Base):
+class BinkyConfig(_Base):
     project: Project
     defaults: Defaults = Defaults()
     services: dict[str, Service] = {}
@@ -168,7 +168,7 @@ class WarrenConfig(_Base):
     hooks: Hooks | None = None
 
     @model_validator(mode="after")
-    def _cross_refs(self) -> WarrenConfig:
+    def _cross_refs(self) -> BinkyConfig:
         names = set(self.services)
         for svc, spec in self.services.items():
             for dep in spec.depends_on:
@@ -193,22 +193,22 @@ class WarrenConfig(_Base):
 #  loading
 # --------------------------------------------------------------------------- #
 def _format_errors(exc: ValidationError) -> str:
-    lines = ["invalid warren.toml:"]
+    lines = ["invalid binky.toml:"]
     for err in exc.errors():
         loc = ".".join(str(p) for p in err["loc"]) or "(root)"
         lines.append(f"  • {loc}: {err['msg']}")
     return "\n".join(lines)
 
 
-def load_config_data(data: dict) -> WarrenConfig:
+def load_config_data(data: dict) -> BinkyConfig:
     """Validate already-parsed toml data. Raises :class:`ConfigError`."""
     try:
-        return WarrenConfig.model_validate(data)
+        return BinkyConfig.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(_format_errors(exc)) from exc
 
 
-def security_warnings(cfg: WarrenConfig) -> list[str]:
+def security_warnings(cfg: BinkyConfig) -> list[str]:
     """Non-fatal footguns worth flagging (e.g. a secret written inline in the toml)."""
     out: list[str] = []
     for name, svc in cfg.services.items():
@@ -221,11 +221,11 @@ def security_warnings(cfg: WarrenConfig) -> list[str]:
     return out
 
 
-def load_config(path: str | Path) -> WarrenConfig:
-    """Read and validate a ``warren.toml`` file. Raises :class:`ConfigError`."""
+def load_config(path: str | Path) -> BinkyConfig:
+    """Read and validate a ``binky.toml`` file. Raises :class:`ConfigError`."""
     p = Path(path)
     if not p.exists():
-        raise ConfigError(f"no warren.toml found at {p}")
+        raise ConfigError(f"no binky.toml found at {p}")
     try:
         with p.open("rb") as fh:
             data = tomllib.load(fh)

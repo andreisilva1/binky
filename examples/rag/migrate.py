@@ -1,4 +1,4 @@
-"""Create the schema. Warren runs this against $DATABASE_URL.
+"""Create the schema. Binky runs this against $DATABASE_URL.
 
 It runs once into the golden template, not once per worktree — see README.md.
 """

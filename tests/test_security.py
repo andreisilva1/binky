@@ -3,9 +3,9 @@ warning. Threat model is local single-user — see SECURITY.md."""
 
 import pytest
 
-from warren import ops
-from warren.config import load_config_data, security_warnings
-from warren.rpc import RpcFault
+from binky import ops
+from binky.config import load_config_data, security_warnings
+from binky.rpc import RpcFault
 
 
 @pytest.mark.parametrize("name", ["feat", "feat/login-fix", "v1.2_x", "a-b", "release/2026"])
@@ -35,7 +35,7 @@ def test_env_admin_url_is_not_warned() -> None:
     cfg = load_config_data(
         {
             "project": {"name": "acme"},
-            "services": {"db": {"adapter": "postgres", "admin_url": "${env.WARREN_DB_ADMIN_URL}"}},
+            "services": {"db": {"adapter": "postgres", "admin_url": "${env.BINKY_DB_ADMIN_URL}"}},
         }
     )
     assert security_warnings(cfg) == []

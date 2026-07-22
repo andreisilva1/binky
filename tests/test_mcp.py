@@ -5,12 +5,12 @@ import importlib.util
 
 import pytest
 
-from warren import mcp
+from binky import mcp
 
 _HAS_MCP = importlib.util.find_spec("mcp") is not None
 
 
-def test_tools_are_the_warren_verbs() -> None:
+def test_tools_are_the_binky_verbs() -> None:
     assert {fn.__name__ for fn in mcp.TOOLS} == {"up", "down", "status", "env", "verify"}
 
 
@@ -40,7 +40,7 @@ def test_tools_wrap_the_daemon_rpc(monkeypatch) -> None:
 
 @pytest.mark.skipif(_HAS_MCP, reason="mcp installed → build_server succeeds")
 def test_build_server_requires_extra() -> None:
-    with pytest.raises(RuntimeError, match=r"warren\[mcp\]"):
+    with pytest.raises(RuntimeError, match=r"binky\[mcp\]"):
         mcp.build_server()
 
 

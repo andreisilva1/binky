@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "warren"
+name = "binky"
 description = "Give every git worktree its own isolated local world — ports, env, database, URLs — so a swarm of agents runs in parallel without collisions."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,18 +24,12 @@ classifiers = [
   "Topic :: Software Development :: Build Tools",
 ]
 dynamic = ["version"]
-
-[project.urls]
-Homepage = "https://github.com/andreisilva1/warren"
-Repository = "https://github.com/andreisilva1/warren"
-Changelog = "https://github.com/andreisilva1/warren/blob/main/CHANGELOG.md"
-Issues = "https://github.com/andreisilva1/warren/issues"
 dependencies = [
   "typer>=0.12",
   "pydantic>=2",
   "psutil>=5.9",
   "textual>=0.50",
-  # `warren init` reads docker-compose.yml. It is the first command a new user
+  # `binky init` reads docker-compose.yml. It is the first command a new user
   # runs, so it cannot sit behind an extra — and compose files in the wild use
   # anchors and flow collections that a hand-rolled subset parser would
   # mis-read silently, which is the one failure mode a generator must not have.
@@ -51,7 +45,7 @@ mcp = [
   "mcp>=1.0",
 ]
 
-# One extra per adapter — installing Warren for Redis should not pull boto3.
+# One extra per adapter — installing Binky for Redis should not pull boto3.
 # `all-adapters` is the convenience roll-up for "I want the whole matrix".
 postgres = ["psycopg[binary]>=3"]
 redis = ["redis>=5"]
@@ -70,13 +64,19 @@ all-adapters = [
 ]
 
 [project.scripts]
-warren = "warren.cli:app"
+binky = "binky.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/andreisilva1/binky"
+Repository = "https://github.com/andreisilva1/binky"
+Changelog = "https://github.com/andreisilva1/binky/blob/main/CHANGELOG.md"
+Issues = "https://github.com/andreisilva1/binky/issues"
 
 [tool.hatch.version]
-path = "src/warren/__init__.py"
+path = "src/binky/__init__.py"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/warren"]
+packages = ["src/binky"]
 
 [tool.ruff]
 line-length = 100

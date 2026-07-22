@@ -5,8 +5,8 @@ import shutil
 import sys
 from pathlib import Path
 
-from warren import https
-from warren.https import Caddy, caddy_binary, render_caddyfile
+from binky import https
+from binky.https import Caddy, caddy_binary, render_caddyfile
 
 
 def test_render_caddyfile_default_and_custom_port() -> None:
@@ -20,9 +20,9 @@ def test_render_caddyfile_default_and_custom_port() -> None:
 
 
 def test_caddy_binary_env_override(monkeypatch) -> None:
-    monkeypatch.setenv("WARREN_CADDY", "/opt/caddy")
+    monkeypatch.setenv("BINKY_CADDY", "/opt/caddy")
     assert caddy_binary() == "/opt/caddy"
-    monkeypatch.delenv("WARREN_CADDY", raising=False)
+    monkeypatch.delenv("BINKY_CADDY", raising=False)
     monkeypatch.setattr(
         https.shutil, "which", lambda name: "/usr/bin/caddy" if name == "caddy" else None
     )
@@ -30,7 +30,7 @@ def test_caddy_binary_env_override(monkeypatch) -> None:
 
 
 def test_absent_caddy_is_graceful(monkeypatch) -> None:
-    monkeypatch.delenv("WARREN_CADDY", raising=False)
+    monkeypatch.delenv("BINKY_CADDY", raising=False)
     monkeypatch.setattr(https.shutil, "which", lambda name: None)
     caddy = Caddy(8080)
     assert not caddy.available
@@ -50,7 +50,7 @@ class _FakeCaddy(Caddy):
 
 
 def test_caddy_lifecycle(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
     script = tmp_path / "sleep.py"
     script.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
 
@@ -60,7 +60,7 @@ def test_caddy_lifecycle(tmp_path, monkeypatch) -> None:
     assert caddy.running
     assert caddy.start() is False  # idempotent while running
 
-    # the Caddyfile was materialized under WARREN_HOME
+    # the Caddyfile was materialized under BINKY_HOME
     assert (tmp_path / "home" / "caddy" / "Caddyfile").exists()
 
     caddy.stop()
@@ -75,7 +75,7 @@ _HAS_CADDY = shutil.which("caddy") is not None
 
 @pytest.mark.skipif(not _HAS_CADDY, reason="install Caddy on PATH to run the real TLS front")
 def test_real_caddy_starts(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
     caddy = Caddy(8080, https_port=8443)
     try:
         assert caddy.start() is True

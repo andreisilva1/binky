@@ -1,7 +1,7 @@
 """First-party adapters that need an optional driver.
 
-They live here rather than in :mod:`warren.adapters` so importing the contract
-never drags in boto3/pymongo/redis — :func:`warren.adapters.get` imports this
+They live here rather than in :mod:`binky.adapters` so importing the contract
+never drags in boto3/pymongo/redis — :func:`binky.adapters.get` imports this
 module the first time one of these names is actually used.
 
 Every adapter carves a *slice* of a server you already run. The isolation
@@ -41,7 +41,7 @@ import urllib.parse
 import urllib.request
 from typing import ClassVar
 
-from warren.adapters import Adapter, AdapterError, _with_dbname
+from binky.adapters import Adapter, AdapterError, _with_dbname
 
 
 # --------------------------------------------------------------------------- #
@@ -52,7 +52,7 @@ def _driver(module: str, extra: str):
     try:
         return __import__(module, fromlist=["_"])
     except ImportError as exc:  # pragma: no cover — only without the extra installed
-        raise AdapterError(f"{module} not installed — `pip install 'warren[{extra}]'`") from exc
+        raise AdapterError(f"{module} not installed — `pip install 'binky[{extra}]'`") from exc
 
 
 def _fit(name: str, limit: int) -> str:
@@ -119,7 +119,7 @@ def _http(
 # --------------------------------------------------------------------------- #
 # Claim a logical DB for a slice, atomically. Returns the existing index if the
 # slice already has one, the lowest free index otherwise, and -1 when the server
-# is full. Lua because the read-then-write has to be one step: two `warren up`
+# is full. Lua because the read-then-write has to be one step: two `binky up`
 # racing would otherwise both see the same free index.
 _CLAIM_DB = """
 local existing = redis.call('HGET', KEYS[1], ARGV[1])
@@ -141,20 +141,20 @@ class RedisAdapter(Adapter):
     """One logical Redis DB per worktree.
 
     Redis ships with 16 logical DBs and no way to add more at runtime. DB 0 holds
-    Warren's slice→index map, so a stock server supports 15 concurrent worktrees
+    Binky's slice→index map, so a stock server supports 15 concurrent worktrees
     and the 16th fails loudly. That cap is deliberate: the alternative — namespacing
     by key prefix — cannot implement teardown (no `FLUSHDB`) and leaks across
     `SCAN`/`KEYS`/`DBSIZE`, which is worse than a clear error.
     """
 
     CAPABILITIES: ClassVar[dict] = {"clone": True}
-    MAP_KEY: ClassVar[str] = "warren:slices"
+    MAP_KEY: ClassVar[str] = "binky:slices"
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
-        self.admin_url = config.get("admin_url") or os.environ.get("WARREN_REDIS_URL")
+        self.admin_url = config.get("admin_url") or os.environ.get("BINKY_REDIS_URL")
         if not self.admin_url:
-            raise AdapterError("redis adapter needs an admin_url (or $WARREN_REDIS_URL)")
+            raise AdapterError("redis adapter needs an admin_url (or $BINKY_REDIS_URL)")
         self._databases = config.get("databases")
 
     def _client(self, db: int = 0):
@@ -226,9 +226,9 @@ class MySQLAdapter(Adapter):
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
-        self.admin_url = config.get("admin_url") or os.environ.get("WARREN_MYSQL_URL")
+        self.admin_url = config.get("admin_url") or os.environ.get("BINKY_MYSQL_URL")
         if not self.admin_url:
-            raise AdapterError("mysql adapter needs an admin_url (or $WARREN_MYSQL_URL)")
+            raise AdapterError("mysql adapter needs an admin_url (or $BINKY_MYSQL_URL)")
         self._parts = urllib.parse.urlsplit(self.admin_url)
         self._clone_ok: bool | None = None
 
@@ -337,7 +337,7 @@ class MySQLAdapter(Adapter):
 
         A `mysqldump` older than the server it is dumping fails to load the server's
         default auth plugin, and says so in a way that reads like a broken install
-        rather than a version mismatch. Warren has already fallen back to per-worktree
+        rather than a version mismatch. Binky has already fallen back to per-worktree
         migrate+seed by the time this is read, so the message says what to fix, not
         what broke.
         """
@@ -345,7 +345,7 @@ class MySQLAdapter(Adapter):
         if "caching_sha2_password" in detail or "1045" in detail:
             detail += (
                 " — the `mysqldump` on PATH is most likely older than the server it is "
-                "dumping. Slices still work (Warren falls back to per-worktree "
+                "dumping. Slices still work (Binky falls back to per-worktree "
                 "migrate+seed); upgrade the MySQL client to get instant clones back."
             )
         return detail
@@ -363,13 +363,13 @@ class MongoAdapter(Adapter):
     """
 
     CAPABILITIES: ClassVar[dict] = {"clone": True}
-    MARKER: ClassVar[str] = "__warren"
+    MARKER: ClassVar[str] = "__binky"
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
-        self.admin_url = config.get("admin_url") or os.environ.get("WARREN_MONGO_URL")
+        self.admin_url = config.get("admin_url") or os.environ.get("BINKY_MONGO_URL")
         if not self.admin_url:
-            raise AdapterError("mongodb adapter needs an admin_url (or $WARREN_MONGO_URL)")
+            raise AdapterError("mongodb adapter needs an admin_url (or $BINKY_MONGO_URL)")
 
     def _client(self):
         pymongo = _driver("pymongo", "mongodb")
@@ -386,7 +386,7 @@ class MongoAdapter(Adapter):
     def provision(self, slice_name: str) -> None:
         with contextlib.closing(self._client()) as client:
             db = client[self._ident(slice_name)]
-            db[self.MARKER].update_one({"_id": "warren"}, {"$set": {"managed": True}}, upsert=True)
+            db[self.MARKER].update_one({"_id": "binky"}, {"$set": {"managed": True}}, upsert=True)
 
     def resolve(self, slice_name: str) -> str:
         return _with_dbname(self.admin_url, self._ident(slice_name))
@@ -448,7 +448,7 @@ class S3Adapter(Adapter):
         # S3 bucket names: lowercase, 3-63 chars, [a-z0-9-], no leading/trailing dash.
         name = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]", "-", slice_name.lower())).strip("-")
         if len(name) < 3:
-            name = f"warren-{name}".strip("-")
+            name = f"binky-{name}".strip("-")
         return _fit(name, 63)
 
     @staticmethod
@@ -525,11 +525,11 @@ class RabbitMQAdapter(Adapter):
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
-        self.admin_url = config.get("admin_url") or os.environ.get("WARREN_RABBITMQ_URL")
+        self.admin_url = config.get("admin_url") or os.environ.get("BINKY_RABBITMQ_URL")
         if not self.admin_url:
             raise AdapterError(
                 "rabbitmq adapter needs an admin_url pointing at the management API "
-                "(e.g. http://guest:guest@localhost:15672), or $WARREN_RABBITMQ_URL"
+                "(e.g. http://guest:guest@localhost:15672), or $BINKY_RABBITMQ_URL"
             )
         self._parts = urllib.parse.urlsplit(self.admin_url)
         self.amqp_port = int(config.get("amqp_port") or 5672)
@@ -581,9 +581,9 @@ class KafkaAdapter(Adapter):
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
-        url = config.get("admin_url") or os.environ.get("WARREN_KAFKA_URL") or ""
+        url = config.get("admin_url") or os.environ.get("BINKY_KAFKA_URL") or ""
         if not url:
-            raise AdapterError("kafka adapter needs an admin_url (or $WARREN_KAFKA_URL)")
+            raise AdapterError("kafka adapter needs an admin_url (or $BINKY_KAFKA_URL)")
         parts = urllib.parse.urlsplit(url if "://" in url else f"kafka://{url}")
         self.bootstrap = parts.netloc or "localhost:9092"
         self.topics = [t for t in (config.get("topics") or "").split(",") if t.strip()]
@@ -647,7 +647,7 @@ class QdrantAdapter(Adapter):
     Qdrant collections are flat and carry their own vector schema (size, distance
     metric) that only your app knows — so `provision` is a no-op and your code
     creates ``<prefix>__embeddings`` itself. Teardown drops every collection under
-    the prefix, which is the part Warren can own honestly.
+    the prefix, which is the part Binky can own honestly.
     """
 
     SEP: ClassVar[str] = "__"
@@ -655,7 +655,7 @@ class QdrantAdapter(Adapter):
     def __init__(self, config: dict) -> None:
         super().__init__(config)
         self.admin_url = (
-            config.get("admin_url") or os.environ.get("WARREN_QDRANT_URL") or "http://localhost:6333"
+            config.get("admin_url") or os.environ.get("BINKY_QDRANT_URL") or "http://localhost:6333"
         ).rstrip("/")
         self.api_key = config.get("api_key")
 
@@ -707,11 +707,11 @@ class ClickHouseAdapter(Adapter):
 
     def __init__(self, config: dict) -> None:
         super().__init__(config)
-        self.admin_url = config.get("admin_url") or os.environ.get("WARREN_CLICKHOUSE_URL")
+        self.admin_url = config.get("admin_url") or os.environ.get("BINKY_CLICKHOUSE_URL")
         if not self.admin_url:
             raise AdapterError(
                 "clickhouse adapter needs an admin_url pointing at the HTTP interface "
-                "(e.g. http://default:@localhost:8123), or $WARREN_CLICKHOUSE_URL"
+                "(e.g. http://default:@localhost:8123), or $BINKY_CLICKHOUSE_URL"
             )
 
     def _query(self, sql: str) -> str:
@@ -762,7 +762,7 @@ class ElasticsearchAdapter(Adapter):
     the server — Elasticsearch has no tenant primitive below the cluster.
 
     ``provision`` only checks reachability by default, because an index's mappings
-    belong to your app, not to Warren; list ``options.indices`` to have them created
+    belong to your app, not to Binky; list ``options.indices`` to have them created
     empty up front. Teardown enumerates indices and deletes the ones under the prefix
     by exact name — never by wildcard, which ES 8 refuses by default
     (``action.destructive_requires_name``) and which would be a bad thing to teach.
@@ -774,7 +774,7 @@ class ElasticsearchAdapter(Adapter):
         super().__init__(config)
         self.admin_url = (
             config.get("admin_url")
-            or os.environ.get("WARREN_ELASTICSEARCH_URL")
+            or os.environ.get("BINKY_ELASTICSEARCH_URL")
             or "http://localhost:9200"
         ).rstrip("/")
         self.api_key = config.get("api_key")

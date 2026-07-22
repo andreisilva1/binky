@@ -1,0 +1,10 @@
+# A minimal Binky project. From this directory:
+#   binky up demo        → serves at web.demo.hello.localhost (via the proxy)
+#   binky status
+#   binky remove demo
+[project]
+name = "hello"
+
+[services.web]
+cmd = "python app.py"
+url = "web"
