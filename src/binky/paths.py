@@ -21,6 +21,15 @@ def daemon_info_path() -> Path:
     return binky_home() / "daemon.json"
 
 
+def daemon_log_path() -> Path:
+    """Whatever the daemon wrote to stderr while starting up.
+
+    Truncated on every spawn: it answers "why didn't it come up *this* time",
+    which is the only question worth asking of it.
+    """
+    return binky_home() / "daemon.err"
+
+
 def socket_path() -> Path:
     """Unix-domain socket path (Unix only; Windows uses a loopback TCP port)."""
     return binky_home() / "binky.sock"

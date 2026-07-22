@@ -4,7 +4,7 @@ import contextlib
 
 import pytest
 
-from binky import daemon, ipc
+from binky import daemon, ipc, paths
 
 
 @pytest.fixture(autouse=True)
@@ -22,6 +22,25 @@ def test_not_running_initially() -> None:
     assert ipc.read_daemon_info() is None
     with pytest.raises(ipc.DaemonNotRunning):
         ipc.call("ping")
+
+
+def test_a_daemon_that_dies_on_startup_says_why(monkeypatch) -> None:
+    """A failed start must report the cause, not just that time ran out.
+
+    With stderr going to DEVNULL these two were the same event to the caller,
+    which is what made a dead daemon look like a slow one. An unparseable proxy
+    port kills the daemon before it writes its endpoint file, so this exercises
+    the path where there is nothing to ping and never will be.
+    """
+    monkeypatch.setenv("BINKY_PROXY_PORT", "not-a-port")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        daemon.start(timeout=30)
+
+    message = str(excinfo.value)
+    assert "exited with code" in message, message  # fast-failed, didn't wait out the timeout
+    assert "not-a-port" in message  # and carried the daemon's own traceback back
+    assert paths.daemon_log_path().exists()
 
 
 def test_start_ping_stop() -> None:

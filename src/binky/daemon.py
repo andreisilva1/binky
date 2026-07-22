@@ -279,27 +279,53 @@ def is_running() -> bool:
         return False
 
 
+def _startup_failure(reason: str) -> str:
+    """Fold whatever the daemon managed to say into the error the caller sees."""
+    log = paths.daemon_log_path()
+    text = ""
+    with contextlib.suppress(OSError):
+        text = log.read_text(encoding="utf-8", errors="replace").strip()
+    if not text:
+        return f"{reason}; it wrote nothing to {log}"
+    tail = "\n".join(text.splitlines()[-15:])
+    return f"{reason}. Last output from {log}:\n{tail}"
+
+
 def start(timeout: float = 10.0) -> None:
     """Spawn the daemon detached and wait until it is reachable. Idempotent."""
     if is_running():
         return
-    kwargs: dict = {
-        "stdin": subprocess.DEVNULL,
-        "stdout": subprocess.DEVNULL,
-        "stderr": subprocess.DEVNULL,
-    }
+    kwargs: dict = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
     if os.name == "nt":
         kwargs["creationflags"] = subprocess.DETACHED_PROCESS
     else:
         kwargs["start_new_session"] = True
-    subprocess.Popen([sys.executable, "-m", "binky", "daemon", "serve"], **kwargs)
+
+    # The daemon outlives this process, so its stderr can't be a pipe — nobody
+    # would be left to drain it. Sending it to DEVNULL was worse: it made a
+    # daemon that died on startup indistinguishable from one that was merely
+    # slow, and the caller got a bare timeout with the traceback thrown away.
+    log = paths.daemon_log_path()
+    err = None
+    with contextlib.suppress(OSError):
+        log.parent.mkdir(parents=True, exist_ok=True)
+        err = log.open("wb")
+    kwargs["stderr"] = err or subprocess.DEVNULL
+    try:
+        proc = subprocess.Popen([sys.executable, "-m", "binky", "daemon", "serve"], **kwargs)
+    finally:
+        if err is not None:
+            err.close()  # the child inherited its own handle
 
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if is_running():
             return
+        # Don't sit out the whole timeout for a process that is already gone.
+        if proc.poll() is not None:
+            raise RuntimeError(_startup_failure(f"daemon exited with code {proc.returncode}"))
         time.sleep(0.05)
-    raise RuntimeError("daemon did not become ready in time")
+    raise RuntimeError(_startup_failure("daemon did not become ready in time"))
 
 
 def stop(timeout: float = 5.0) -> bool:

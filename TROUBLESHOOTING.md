@@ -149,6 +149,14 @@ keep running; the daemon reconciles them on the way back up.
 binky daemon stop && binky daemon start
 ```
 
+If it dies instead of wedging, the error carries the reason with it — the daemon is detached, so
+its stderr goes to `~/.binky/daemon.err`, rewritten on every start attempt. Read it directly when
+you want the whole traceback rather than the last fifteen lines:
+
+```bash
+cat ~/.binky/daemon.err
+```
+
 ### The registry looks corrupt
 
 State is a SQLite database at `~/.binky/binky.db`, migrated in place across upgrades. It's yours —
