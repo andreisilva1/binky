@@ -117,3 +117,14 @@ def test_env_empty_without_expose(tmp_path: Path) -> None:
 
     res = ipc.call("env", {"root": str(proj), "worktree": "feat"})
     assert res["env"] == {}
+
+
+def test_metrics_via_daemon(tmp_path: Path) -> None:
+    daemon.start(timeout=20)
+    proj = _project(tmp_path)
+    ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=60)
+
+    m = ipc.call("metrics")
+    assert m["worktrees"]["total"] >= 1
+    assert m["worktrees"]["running"] >= 1
+    assert set(m["admission"]) == {"capacity", "in_use", "queued"}

@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 
-from warren import admission, ipc, ops, paths, proxy, rpc
+from warren import admission, ipc, observability, ops, paths, proxy, rpc
 from warren.https import Caddy
 from warren.registry import Registry, WorktreeStatus
 from warren.supervisor import ProcessManager, TickReport
@@ -54,6 +54,7 @@ class Daemon:
         self.router.add("status", self._status)
         self.router.add("verify", self._verify)
         self.router.add("env", self._env)
+        self.router.add("metrics", self._metrics)
 
     async def _ping(self, _params: dict) -> dict:
         return {"pong": True, "pid": os.getpid()}
@@ -94,18 +95,24 @@ class Daemon:
             self._slots[(result["project"], result["worktree"])] = token
             self._routes_by_wt[(result["project"], result["worktree"])] = result.get("routes", {})
             self._rebuild_routes()
+            observability.log_event(
+                "up", project=result["project"], worktree=result["worktree"],
+                services=len(result.get("services", [])),
+            )
             return result
 
     async def _down(self, params: dict) -> dict:
         async with self._wt_lock(params.get("root"), params.get("worktree")):
             result = await asyncio.to_thread(ops.down, self.registry, self.procman, params)
         self._release_slot(result["project"], result["worktree"])
+        observability.log_event("down", project=result["project"], worktree=result["worktree"])
         return result
 
     async def _remove(self, params: dict) -> dict:
         async with self._wt_lock(params.get("root"), params.get("worktree")):
             result = await asyncio.to_thread(ops.remove, self.registry, self.procman, params)
         self._release_slot(result["project"], result["worktree"])
+        observability.log_event("remove", project=result["project"], worktree=result["worktree"])
         return result
 
     def _release_slot(self, project: str, worktree: str) -> None:
@@ -149,6 +156,8 @@ class Daemon:
                 self.registry.clear_processes(wt_id)
                 for pid in pids:
                     self.registry.add_process(wt_id, pid)
+        for wt_id, service in report.restarted:
+            observability.log_event("restart", worktree_id=wt_id, service=service)
         for wt_id in report.worktrees_down:
             wt = None
             with contextlib.suppress(Exception):
@@ -157,6 +166,7 @@ class Daemon:
                 self.registry.set_worktree_status(wt_id, WorktreeStatus.stopped)
             if wt is not None:  # free the RAM slot + drop proxy routes
                 self._release_slot(wt.project, wt.name)
+                observability.log_event("gc", project=wt.project, worktree=wt.name)
 
     async def _status(self, params: dict) -> dict:
         # read-only and thread-safe (connection-per-thread registry); no lock needed
@@ -164,10 +174,20 @@ class Daemon:
 
     async def _verify(self, params: dict) -> dict:
         async with self._wt_lock(params.get("root"), params.get("worktree")):
-            return await asyncio.to_thread(ops.verify, self.registry, self.procman, params)
+            result = await asyncio.to_thread(ops.verify, self.registry, self.procman, params)
+        observability.log_event(
+            "verify", project=result["project"], worktree=result["worktree"],
+            verdict=result["verify"],
+        )
+        return result
 
     async def _env(self, params: dict) -> dict:
         return await asyncio.to_thread(ops.env, self.registry, params)
+
+    async def _metrics(self, _params: dict) -> dict:
+        return await asyncio.to_thread(
+            observability.collect_metrics, self.registry, self.procman, self.admission
+        )
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:

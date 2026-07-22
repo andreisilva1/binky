@@ -73,6 +73,14 @@ class AdmissionController:
         self.max_parallel = max(1, value)
         self.pump()
 
+    @property
+    def in_use(self) -> int:
+        return len(self._reserved)
+
+    @property
+    def queued(self) -> int:
+        return len(self._waiters)
+
 
 def make_default() -> AdmissionController:
     with contextlib.suppress(Exception):

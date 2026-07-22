@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from itertools import groupby
 from pathlib import Path
@@ -227,6 +228,78 @@ def mcp() -> None:
     except RuntimeError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
+
+
+@app.command()
+def metrics() -> None:
+    """Print point-in-time daemon metrics as JSON."""
+    if not _daemon.is_running():
+        typer.secho("daemon not running", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    typer.echo(json.dumps(ipc.call("metrics"), indent=2))
+
+
+def _dir_size(path: Path) -> int:
+    total = 0
+    if path.exists():
+        for item in path.rglob("*"):
+            with contextlib.suppress(OSError):
+                if item.is_file():
+                    total += item.stat().st_size
+    return total
+
+
+def _human(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f}{unit}"
+        n /= 1024
+    return f"{n:.0f}TB"
+
+
+@app.command()
+def doctor() -> None:
+    """Diagnose the Warren install + daemon; exit non-zero if something is wrong."""
+    ok = True
+
+    def line(passed: bool, label: str, detail: str = "", warn: bool = False) -> None:
+        nonlocal ok
+        mark = "✓" if passed else ("⚠" if warn else "✗")
+        color = (
+            typer.colors.GREEN if passed else (typer.colors.YELLOW if warn else typer.colors.RED)
+        )
+        typer.secho(f"  {mark} {label}" + (f" — {detail}" if detail else ""), fg=color)
+        if not passed and not warn:
+            ok = False
+
+    running = _daemon.is_running()
+    line(running, "daemon reachable", "" if running else "starts on demand", warn=not running)
+
+    try:
+        from warren.registry import Registry, default_db_path
+
+        Registry.connect().close()
+        line(True, "registry openable", str(default_db_path()))
+    except Exception as exc:
+        line(False, "registry openable", str(exc))
+
+    from warren.https import caddy_binary
+
+    caddy = caddy_binary()
+    line(bool(caddy), "Caddy (https)", caddy or "not on PATH — https unavailable", warn=not caddy)
+
+    logs_size = _dir_size(paths.logs_dir())
+    logs_ok = logs_size <= 500 * 1024 * 1024
+    line(logs_ok, "log size", _human(logs_size), warn=not logs_ok)
+
+    if running:
+        m = ipc.call("metrics")
+        wt = m["worktrees"]
+        typer.echo(
+            f"  · {wt['running']} running / {wt['total']} worktrees, "
+            f"{m['ports_allocated']} ports, {m['slices']} slices"
+        )
+    raise typer.Exit(code=0 if ok else 1)
 
 
 @app.command()
