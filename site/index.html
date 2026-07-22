@@ -102,6 +102,7 @@
 
 <span class="tok-sec">[services.api]</span>
 <span class="tok-key">cmd</span>        = <span class="tok-str">"uv run api --port ${self.port}"</span>
+<span class="tok-key">url</span>        = <span class="tok-str">true</span>          <span class="tok-cmt"># and so it gets a port</span>
 <span class="tok-key">depends_on</span> = [<span class="tok-str">"db"</span>]
 <span class="tok-key">health</span>     = <span class="tok-str">"http://localhost:${self.port}/healthz"</span>
 
@@ -140,7 +141,7 @@
         <div class="cmd-item"><code>binky status</code><span>Every worktree on the machine, live: state, services, ports.</span></div>
         <div class="cmd-item"><code>binky env &lt;wt&gt;</code><span>Print the live coordinates as JSON or <code>.env</code>.</span></div>
         <div class="cmd-item"><code>binky verify &lt;wt&gt;</code><span>Run the project's checks; records pass/fail on the worktree.</span></div>
-        <div class="cmd-item"><code>binky logs &lt;wt&gt;</code><span>Captured stdout/stderr per service, rotated and retained.</span></div>
+        <div class="cmd-item"><code>binky logs &lt;wt&gt;</code><span>Captured stdout/stderr per service, kept until you remove the worktree.</span></div>
         <div class="cmd-item"><code>binky dashboard</code><span>Live TUI over the whole binky.</span></div>
         <div class="cmd-item"><code>binky doctor</code><span>Diagnose the install and daemon; non-zero when something's wrong.</span></div>
         <div class="cmd-item"><code>binky mcp</code><span>Expose the same verbs as MCP tools, for agents.</span></div>
@@ -269,7 +270,6 @@
     <nav class="foot-links">
       <a href="./docs.html">Docs</a>
       <a href="https://github.com/andreisilva1/binky" rel="noopener">GitHub</a>
-      <a href="https://github.com/andreisilva1/binky/blob/main/CHANGELOG.md" rel="noopener">Changelog</a>
     </nav>
   </div>
 </footer>

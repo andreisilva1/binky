@@ -1,12 +1,27 @@
-<img src="site/binky.svg" alt="" width="76" />
+<div align="center">
+
+<img src="site/binky.svg" alt="" width="88" />
 
 # Binky
 
-**Give every git worktree its own isolated local world — ports, env, database, URLs — so a swarm of coding agents runs in parallel on one machine without anything colliding.**
+**One isolated local world per git worktree — ports, env, database, URLs.**
+
+So a swarm of coding agents runs in parallel on one machine without anything colliding.
+
+[![CI](https://github.com/andreisilva1/binky/actions/workflows/ci.yml/badge.svg)](https://github.com/andreisilva1/binky/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/binky.svg)](https://pypi.org/project/binky/)
+[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
+[Quickstart](#quickstart) · [Adapters](#adapters) · [Commands](#commands) · [For agents](#for-agents) · [How it works](#how-it-works) · [Troubleshooting](TROUBLESHOOTING.md)
+
+</div>
+
+---
 
 `docker-compose` was built for one process at a time. Binky is built for fifteen at once.
 
-> Status: **alpha**. The core works end to end — worktree isolation, ports, adapters, supervision,
+> **Status: alpha.** The core works end to end — worktree isolation, ports, adapters, supervision,
 > reconciler, admission, proxy, HTTPS. The config format is stable; the CLI may still move.
 
 ## The problem
@@ -60,9 +75,11 @@ name = "acme"
 cmd = "pnpm dev --port ${self.port}"
 url = "web"                              # → web.<worktree>.acme.localhost
 depends_on = ["api"]
+env = { API_URL = "${api.url}" }
 
 [services.api]
 cmd = "go run ./cmd/server"
+url = "api"                              # asking for a URL is what asks for a port
 depends_on = ["db"]
 env = { DATABASE_URL = "${db.url}" }
 
@@ -76,16 +93,51 @@ clone_from = "golden"                    # migrate+seed once, then copy per work
 
 Then bring worktrees up in parallel:
 
+```console
+$ binky up login-fix
+  api  pid 16560  :4846
+  web  pid 29732  :4504
+✓ up: login-fix (2 service(s))
+
+$ binky up checkout-v2
+  api  pid 21768  :4137
+  web  pid 46336  :4605
+✓ up: checkout-v2 (2 service(s))
+
+$ binky status
+acme
+  checkout-v2  [running]
+      api  :4137
+      web  :4605
+  login-fix  [running]
+      api  :4846
+      web  :4504
+```
+
+Two branches, four processes, four ports nobody chose by hand. Hand a worktree's coordinates to
+whoever needs them — a shell, an agent, a test run:
+
+```console
+$ binky env login-fix --dotenv
+WEB_URL=http://web.login-fix.acme.localhost
+API_URL=http://api.login-fix.acme.localhost
+```
+
+And the rest of the lifecycle:
+
 ```bash
-binky up login-fix
-binky up checkout-v2
-binky status               # every worktree on the machine, grouped by project
 binky down login-fix       # pause (keeps files + ports); `up` again is instant
 binky remove login-fix     # destroy it (refuses if there are uncommitted changes)
 ```
 
 Nothing is hardcoded and nothing is discovered at runtime: every process boots already knowing the
 whole port map, its own and its dependencies'.
+
+> **One rule to internalise.** A service gets a port when it declares `url` or `ports` — asking is
+> explicit. A service with neither gets none, which is correct for a worker or a one-shot job, and a
+> trap if you then write `${self.port}` in its `cmd`. Unknown tokens are left alone rather than
+> blanked, so the literal `${self.port}` reaches the shell and the process dies on its own argument
+> parsing. `binky check` warns when a service does this.
 
 ## What it costs to run N worlds
 
@@ -111,6 +163,18 @@ doesn't make your own app processes cheaper — one dev server per worktree cost
 ```bash
 python benchmarks/worlds.py --sweep 1,2,4,8 --rows 200000
 ```
+
+## When you don't need Binky
+
+Worth saying plainly, because the first row of that table already says it:
+
+- **One branch at a time.** If you never have two worlds up at once, Binky is a daemon and a config
+  file you didn't need. Use it when the second agent shows up.
+- **Everything already runs in containers, and that's fine.** Binky's win is removing the *server*
+  per world. If your compose stack is small enough that N copies fit comfortably, there's nothing
+  to reclaim.
+- **You need real isolation, not local isolation.** Binky runs your commands as you, on your
+  machine. It is not a sandbox — see [Security](#security).
 
 ## Adapters
 
@@ -160,7 +224,7 @@ Two tiers, one contract. Both implement the same four verbs:
 are executables in any language, discovered as `binky-adapter-<name>` on `PATH` and driven over a
 one-shot subprocess + JSON protocol:
 
-```
+```console
 $ binky-adapter-filestore provision   <<< '{"slice": "acme_login-fix", "config": {}}'
 {"ok": true}
 $ binky-adapter-filestore resolve     <<< '{"slice": "acme_login-fix", "config": {}}'

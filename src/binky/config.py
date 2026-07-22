@@ -8,7 +8,9 @@ stable — even though the behaviour lands later. Unknown fields are rejected.
 
 from __future__ import annotations
 
+import re
 import tomllib
+from collections.abc import Iterator
 from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlparse
@@ -217,6 +219,38 @@ def security_warnings(cfg: BinkyConfig) -> list[str]:
             out.append(
                 f"service '{name}': admin_url has an inline credential — prefer "
                 "${env.NAME} or an env_file so the secret isn't committed"
+            )
+    return out
+
+
+_SELF_TOKEN = re.compile(r"\$\{self\.[^}]*\}")
+
+
+def _token_sites(svc: Service) -> Iterator[str]:
+    """Every string of a service that goes through token resolution."""
+    yield svc.cmd or ""
+    yield from svc.env.values()
+    if isinstance(svc.health, str):
+        yield svc.health
+    elif svc.health is not None:
+        yield from (probe for probe in (svc.health.http, svc.health.tcp, svc.health.cmd) if probe)
+
+
+def config_warnings(cfg: BinkyConfig) -> list[str]:
+    """Everything ``binky check`` flags: the security footguns plus config that can't work."""
+    out = security_warnings(cfg)
+    for name, svc in cfg.services.items():
+        # Asking for a port is explicit: `ports`, or a `url` that needs one to point at.
+        # A service with neither is allocated none, which is right for a worker and wrong
+        # the moment it writes ${self.…}. Unknown tokens are left verbatim rather than
+        # blanked, so nothing fails at resolve time — the literal `${self.port}` reaches
+        # the shell and the process dies parsing its own arguments. Catch it here instead.
+        if svc.ports is not None or svc.url:
+            continue
+        if any(_SELF_TOKEN.search(text) for text in _token_sites(svc)):
+            out.append(
+                f"service '{name}': uses ${{self....}} but declares neither `ports` nor "
+                "`url`, so it gets no port and the token is left unresolved"
             )
     return out
 

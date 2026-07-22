@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from binky.config import ConfigError, SyncMode, load_config, load_config_data
+from binky.config import ConfigError, SyncMode, config_warnings, load_config, load_config_data
 
 VALID = """
 [project]
@@ -135,3 +135,71 @@ def test_invalid_toml(tmp_path: Path) -> None:
 def test_sync_default_off() -> None:
     cfg = load_config_data({"project": {"name": "x"}, "services": {"a": {"cmd": "x"}}})
     assert cfg.services["a"].sync is SyncMode.off
+
+
+def test_self_token_without_a_port_is_warned() -> None:
+    """The exact config the landing page shipped, which could never have worked.
+
+    `api` asks for no port — neither `ports` nor `url` — so ${self.port} resolves to
+    nothing. Unknown tokens are left verbatim rather than blanked, so the literal
+    string reaches the shell and the process dies parsing its own arguments. Nothing
+    else in the pipeline complains, which is what makes this `check`'s job.
+    """
+    cfg = load_config_data(
+        {
+            "project": {"name": "acme"},
+            "services": {
+                "api": {
+                    "cmd": "uv run api --port ${self.port}",
+                    "health": "http://localhost:${self.port}/healthz",
+                }
+            },
+        }
+    )
+    warnings = config_warnings(cfg)
+    assert any("api" in w and "no port" in w for w in warnings), warnings
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"url": "api"},  # a url needs a port to point at
+        {"url": True},
+        {"ports": ["http"]},  # ${self.port} falls back to the first declared port
+        {"ports": {"http": 0}},
+    ],
+    ids=["url-name", "url-true", "ports-list", "ports-table"],
+)
+def test_a_service_that_asks_for_a_port_is_not_warned(extra: dict) -> None:
+    cfg = load_config_data(
+        {
+            "project": {"name": "acme"},
+            "services": {"api": {"cmd": "uv run api --port ${self.port}", **extra}},
+        }
+    )
+    assert config_warnings(cfg) == []
+
+
+def test_a_portless_service_without_the_token_is_left_alone() -> None:
+    """No port is the right answer for a worker; only the unresolvable token is a bug."""
+    cfg = load_config_data(
+        {
+            "project": {"name": "acme"},
+            "services": {"worker": {"cmd": "celery -A app worker", "env": {"Q": "${worktree}"}}},
+        }
+    )
+    assert config_warnings(cfg) == []
+
+
+def test_the_token_is_found_in_env_and_in_a_health_table() -> None:
+    cfg = load_config_data(
+        {
+            "project": {"name": "acme"},
+            "services": {
+                "a": {"cmd": "run", "env": {"SELF": "http://localhost:${self.port}"}},
+                "b": {"cmd": "run", "health": {"tcp": "localhost:${self.grpc}"}},
+            },
+        }
+    )
+    warned = {w.split("'")[1] for w in config_warnings(cfg)}
+    assert warned == {"a", "b"}

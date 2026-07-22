@@ -139,6 +139,7 @@
 
 <span class="tok-sec">[services.api]</span>
 <span class="tok-key">cmd</span>        = <span class="tok-str">"uv run api --port ${self.port}"</span>
+<span class="tok-key">url</span>        = <span class="tok-str">"api"</span>                     <span class="tok-cmt"># asking for a URL is what asks for a port</span>
 <span class="tok-key">depends_on</span> = [<span class="tok-str">"db"</span>]
 <span class="tok-key">env</span>        = { <span class="tok-key">DATABASE_URL</span> = <span class="tok-str">"${db.url}"</span> }
 <span class="tok-key">health</span>     = <span class="tok-str">"http://localhost:${self.port}/healthz"</span>
@@ -209,6 +210,17 @@
           <strong>before any process starts</strong>, confirms nothing else holds it, and then
           injects the whole map into every service — its own ports and its dependencies'. Nobody
           discovers a port at runtime, because there is nothing left to discover.
+        </p>
+
+        <h3>Which services get one</h3>
+        <p>
+          Asking is explicit: a service is allocated a port if it declares <code>ports</code>, or a
+          <code>url</code> (which needs one to point at). A service with neither gets none — which
+          is right for a worker or a one-shot job, and a trap if you then write
+          <code>${self.port}</code> anywhere. Unrecognised tokens are left alone, so that
+          <code>cmd</code> reaches the shell with a literal <code>${self.port}</code> in it and the
+          process dies on its own argument parsing. <code>binky check</code> warns when a service
+          does this; if it needs a port, say so.
         </p>
 
         <h3>Tokens</h3>
@@ -329,7 +341,9 @@
           <code>restart</code> policy with exponential backoff and a give-up cap, so a service that
           is genuinely broken stops instead of spinning. Everything a service writes to stdout and
           stderr is captured per worktree and per service — <code>binky logs &lt;worktree&gt;</code>
-          — and the log directory is rotated and retained so it doesn't grow without limit.
+          — and a worktree's logs are deleted when you remove it. They are not rotated while it
+          runs, so a service that writes without restraint will grow its log until then;
+          <code>binky doctor</code> flags a log directory past half a gigabyte.
         </p>
         <p>
           The daemon that does all this is machine-global and always alive. It survives your
@@ -670,7 +684,6 @@
     <nav class="foot-links">
       <a href="./docs.html">Docs</a>
       <a href="https://github.com/andreisilva1/binky" rel="noopener">GitHub</a>
-      <a href="https://github.com/andreisilva1/binky/blob/main/CHANGELOG.md" rel="noopener">Changelog</a>
     </nav>
   </div>
 </footer>

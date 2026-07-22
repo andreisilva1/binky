@@ -69,7 +69,6 @@ binky = "binky.cli:app"
 [project.urls]
 Homepage = "https://github.com/andreisilva1/binky"
 Repository = "https://github.com/andreisilva1/binky"
-Changelog = "https://github.com/andreisilva1/binky/blob/main/CHANGELOG.md"
 Issues = "https://github.com/andreisilva1/binky/issues"
 
 [tool.hatch.version]

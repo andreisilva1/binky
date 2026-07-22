@@ -12,7 +12,7 @@ import typer
 
 from binky import __version__, init_cmd, ipc, paths
 from binky import daemon as _daemon
-from binky.config import ConfigError, load_config, security_warnings
+from binky.config import ConfigError, config_warnings, load_config
 
 app = typer.Typer(
     name="binky",
@@ -95,7 +95,7 @@ def check(
         f"{len(cfg.services)} service(s)",
         fg=typer.colors.GREEN,
     )
-    for warning in security_warnings(cfg):
+    for warning in config_warnings(cfg):
         typer.secho(f"  ⚠ {warning}", fg=typer.colors.YELLOW)
 
 
