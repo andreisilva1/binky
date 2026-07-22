@@ -36,11 +36,26 @@ dev = [
   "pytest>=8",
   "ruff>=0.6",
 ]
-postgres = [
-  "psycopg[binary]>=3",
-]
 mcp = [
   "mcp>=1.0",
+]
+
+# One extra per adapter — installing Warren for Redis should not pull boto3.
+# `all-adapters` is the convenience roll-up for "I want the whole matrix".
+postgres = ["psycopg[binary]>=3"]
+redis = ["redis>=5"]
+mysql = ["PyMySQL>=1.1"]
+mongodb = ["pymongo>=4.6"]
+s3 = ["boto3>=1.34"]
+kafka = ["kafka-python>=2.1"]
+# rabbitmq and qdrant drive plain REST management APIs — no driver needed.
+all-adapters = [
+  "psycopg[binary]>=3",
+  "redis>=5",
+  "PyMySQL>=1.1",
+  "pymongo>=4.6",
+  "boto3>=1.34",
+  "kafka-python>=2.1",
 ]
 
 [project.scripts]

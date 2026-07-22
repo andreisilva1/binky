@@ -81,6 +81,24 @@ def _golden_slice_name(project: str, clone_from: str) -> str:
     return adapters.slice_name(project, f"golden_{clone_from}")
 
 
+def _adapter_config(svc, sname: str, ports: dict, worktree: str) -> dict:
+    """The flat config dict handed to an adapter (and to external adapters as JSON).
+
+    ``options`` is flattened in rather than nested so an adapter reads one plain
+    dict; the reserved keys below always win, so an option can never shadow them.
+    Every value goes through ``${env.X}`` resolution, which is how credentials stay
+    out of a committed ``warren.toml``.
+    """
+    options = {k: resolve.resolve(v, sname, ports, worktree) for k, v in svc.options.items()}
+    return {
+        **options,
+        "admin_url": resolve.resolve(svc.admin_url, sname, ports, worktree)
+        if svc.admin_url
+        else None,
+        "buckets": list(svc.buckets),
+    }
+
+
 def _ensure_golden(adapter, svc, sname: str, wt, project: str) -> str:
     """Build (once) the golden template from the service's migrate+seed, and return it.
 
@@ -119,9 +137,8 @@ def _provision_adapters(
     for sname, svc in services.items():
         if not svc.adapter or sname in addresses:
             continue
-        admin = resolve.resolve(svc.admin_url, sname, ports, name) if svc.admin_url else None
         try:
-            adapter = adapters.get(svc.adapter, {"admin_url": admin})
+            adapter = adapters.get(svc.adapter, _adapter_config(svc, sname, ports, name))
             cloned = bool(svc.clone_from) and bool(adapter.capabilities().get("clone"))
             if cloned:
                 golden = _ensure_golden(adapter, svc, sname, wt, project)
@@ -280,9 +297,9 @@ def _teardown_slices(reg, cfg, wt) -> None:
         svc = cfg.services.get(sl.service)
         if not svc or not svc.adapter:
             continue
-        admin = resolve.resolve(svc.admin_url, sl.service, {}, wt.name) if svc.admin_url else None
         with contextlib.suppress(Exception):
-            adapters.get(svc.adapter, {"admin_url": admin}).teardown(sl_name)
+            config = _adapter_config(svc, sl.service, {}, wt.name)
+            adapters.get(svc.adapter, config).teardown(sl_name)
 
 
 def _select_services(cfg, group: str | None) -> dict:

@@ -25,8 +25,8 @@ jobs:
       - name: Test
         run: python -m pytest -q
 
-  postgres:
-    name: postgres integration
+  adapters:
+    name: adapter integration (real servers)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -39,14 +39,101 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:7
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: mysql
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pmysql"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      mongodb:
+        image: mongo:7
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --quiet --eval 'db.runCommand({ping:1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      rabbitmq:
+        image: rabbitmq:3-management
+        ports: ["5672:5672", "15672:15672"]
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      # MinIO, Qdrant and Kafka need entrypoint arguments / a readiness probe the
+      # `services:` block cannot express, so they run as plain containers.
+      - name: Start MinIO, Qdrant and Kafka
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
+          docker run -d --name kafka -p 9092:9092 \
+            -e KAFKA_NODE_ID=1 \
+            -e KAFKA_PROCESS_ROLES=broker,controller \
+            -e KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093 \
+            -e KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092 \
+            -e KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER \
+            -e KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT \
+            -e KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093 \
+            -e KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1 \
+            -e KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1 \
+            -e KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0 \
+            apache/kafka:3.9.0
+
+      - name: Wait for them
+        run: |
+          for port in 9000 6333 9092; do
+            for _ in $(seq 1 60); do
+              if timeout 1 bash -c "</dev/tcp/127.0.0.1/$port" 2>/dev/null; then
+                echo "port $port is up"; break
+              fi
+              sleep 2
+            done
+          done
+
+      # The MySQL adapter reports `clone` only when these are present, so install
+      # them explicitly — otherwise CI would quietly skip the clone path.
+      - name: Install the MySQL client (exercises the clone path)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mysql-client
+
       - name: Install
-        run: python -m pip install -e ".[dev,postgres]"
-      - name: Test adapters against a real Postgres
+        run: python -m pip install -e ".[dev,all-adapters]"
+
+      - name: Test every adapter against a real server
         env:
           WARREN_TEST_PG: postgres://postgres:postgres@localhost:5432/postgres
-        run: python -m pytest -q tests/test_adapters.py
+          WARREN_TEST_REDIS: redis://localhost:6379
+          WARREN_TEST_MYSQL: mysql://root:mysql@localhost:3306
+          WARREN_TEST_MONGO: mongodb://localhost:27017
+          WARREN_TEST_S3: http://localhost:9000
+          WARREN_TEST_S3_KEY: minioadmin
+          WARREN_TEST_S3_SECRET: minioadmin
+          WARREN_TEST_RABBITMQ: http://guest:guest@localhost:15672
+          WARREN_TEST_KAFKA: kafka://localhost:9092
+          WARREN_TEST_QDRANT: http://localhost:6333
+        run: python -m pytest -q tests/test_adapters.py tests/test_builtin_adapters.py
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs kafka; docker logs minio; docker logs qdrant

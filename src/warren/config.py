@@ -120,6 +120,11 @@ class Service(_Base):
     clone_from: str | None = None
     sync: SyncMode = SyncMode.off
     buckets: list[str] = []
+    # Free-form, per-adapter settings. Core never interprets these — they are handed
+    # to the adapter verbatim (after `${env.X}` resolution), which is what keeps new
+    # adapters from needing a schema change here. Values are strings so the same
+    # table serialises unchanged over the external adapters' JSON protocol.
+    options: dict[str, str] = {}
 
     @model_validator(mode="after")
     def _coherent(self) -> Service:
@@ -131,6 +136,7 @@ class Service(_Base):
             "seed": self.seed,
             "clone_from": self.clone_from,
             "buckets": self.buckets or None,
+            "options": self.options or None,
         }
         for field, value in resource_only.items():
             if value and not self.adapter:

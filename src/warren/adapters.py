@@ -22,6 +22,7 @@ first; if absent, Warren looks for ``warren-adapter-<name>`` on ``PATH``.
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -120,9 +121,43 @@ class ExternalAdapter(Adapter):
 # --------------------------------------------------------------------------- #
 _REGISTRY: dict[str, type[Adapter]] = {}
 
+# First-party adapters that need an optional driver. They are imported on first use,
+# not at import time, so `import warren` stays free of boto3/pymongo/... and a missing
+# extra fails where the user can act on it — with the exact `pip install` to run.
+_LAZY: dict[str, str] = {
+    "redis": "RedisAdapter",
+    "mysql": "MySQLAdapter",
+    "mariadb": "MySQLAdapter",
+    "mongodb": "MongoAdapter",
+    "s3": "S3Adapter",
+    "minio": "S3Adapter",
+    "rabbitmq": "RabbitMQAdapter",
+    "kafka": "KafkaAdapter",
+    "redpanda": "KafkaAdapter",
+    "qdrant": "QdrantAdapter",
+}
+
 
 def register(name: str, cls: type[Adapter]) -> None:
     _REGISTRY[name] = cls
+
+
+def available() -> list[str]:
+    """Every adapter name Warren can resolve without leaving the process."""
+    return sorted(set(_REGISTRY) | set(_LAZY))
+
+
+def _load(name: str) -> type[Adapter] | None:
+    cls = _REGISTRY.get(name)
+    if cls is not None:
+        return cls
+    attr = _LAZY.get(name)
+    if attr is None:
+        return None
+    module = importlib.import_module("warren.builtin_adapters")
+    cls = getattr(module, attr)
+    _REGISTRY[name] = cls
+    return cls
 
 
 def get(spec: str, config: dict) -> Adapter:
@@ -132,7 +167,7 @@ def get(spec: str, config: dict) -> Adapter:
     ``warren-adapter-<name>`` executable on PATH is driven over the JSON protocol.
     """
     name = spec.split("@", 1)[0]
-    cls = _REGISTRY.get(name)
+    cls = _load(name)
     if cls is not None:
         return cls(config)
     binary = shutil.which(f"warren-adapter-{name}")
