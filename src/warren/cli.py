@@ -11,7 +11,7 @@ import typer
 
 from warren import __version__, ipc, paths
 from warren import daemon as _daemon
-from warren.config import ConfigError, load_config
+from warren.config import ConfigError, load_config, security_warnings
 
 app = typer.Typer(
     name="warren",
@@ -67,6 +67,8 @@ def check(
         f"{len(cfg.services)} service(s)",
         fg=typer.colors.GREEN,
     )
+    for warning in security_warnings(cfg):
+        typer.secho(f"  ⚠ {warning}", fg=typer.colors.YELLOW)
 
 
 @app.command()

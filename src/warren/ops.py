@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import os
+import re
 import subprocess
 import threading
 from pathlib import Path
@@ -18,6 +19,18 @@ from warren.config import ConfigError, load_config
 from warren.registry import Registry, WorktreeStatus
 from warren.rpc import RpcFault
 from warren.supervisor import ProcessManager, kill_pid
+
+# A worktree name becomes a git branch, a directory, and the ``${worktree}`` token
+# that flows into shell commands — so restrict it to a shell-safe, path-safe charset.
+_SAFE_NAME = re.compile(r"[A-Za-z0-9._][A-Za-z0-9._/-]*")
+
+
+def _validate_name(name: str) -> None:
+    if ".." in name or name.startswith("/") or not _SAFE_NAME.fullmatch(name):
+        raise RpcFault(
+            "bad_name",
+            f"invalid worktree name {name!r}: use letters, digits, '. _ - /' (no '..')",
+        )
 
 
 def _load(root: str | None):
@@ -346,6 +359,7 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     name = params.get("worktree")
     if not name:
         raise RpcFault("bad_request", "missing 'worktree'")
+    _validate_name(name)
     root = params.get("root")
     cfg = _load(root)
     project = cfg.project.name

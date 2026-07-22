@@ -8,6 +8,7 @@ synchronous — a one-shot control call; the server lives in :mod:`warren.daemon
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import socket
@@ -45,6 +46,9 @@ def write_daemon_info(info: DaemonInfo) -> None:
     p = paths.daemon_info_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(asdict(info)), encoding="utf-8")
+    # owner-only: on a loopback transport the token in here is the only guard
+    with contextlib.suppress(OSError):
+        os.chmod(p, 0o600)
 
 
 def read_daemon_info() -> DaemonInfo | None:

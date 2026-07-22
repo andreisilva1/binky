@@ -11,6 +11,7 @@ from __future__ import annotations
 import tomllib
 from enum import StrEnum
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
@@ -199,6 +200,19 @@ def load_config_data(data: dict) -> WarrenConfig:
         return WarrenConfig.model_validate(data)
     except ValidationError as exc:
         raise ConfigError(_format_errors(exc)) from exc
+
+
+def security_warnings(cfg: WarrenConfig) -> list[str]:
+    """Non-fatal footguns worth flagging (e.g. a secret written inline in the toml)."""
+    out: list[str] = []
+    for name, svc in cfg.services.items():
+        inline = svc.adapter and svc.admin_url and "${" not in svc.admin_url
+        if inline and urlparse(svc.admin_url).password:
+            out.append(
+                f"service '{name}': admin_url has an inline credential — prefer "
+                "${env.NAME} or an env_file so the secret isn't committed"
+            )
+    return out
 
 
 def load_config(path: str | Path) -> WarrenConfig:
