@@ -10,6 +10,7 @@ import contextlib
 import hashlib
 import os
 import subprocess
+import threading
 from pathlib import Path
 
 from warren import adapters, allocator, git, health, paths, resolve
@@ -51,10 +52,54 @@ def _topo_order(services: dict) -> list[str]:
     return order
 
 
+# One lock per golden so a shared template is built exactly once under concurrency;
+# late worktrees block briefly, then see the ready marker and clone immediately.
+_GOLDEN_LOCKS: dict[str, threading.Lock] = {}
+_GOLDEN_LOCKS_GUARD = threading.Lock()
+
+
+def _golden_lock(key: str) -> threading.Lock:
+    with _GOLDEN_LOCKS_GUARD:
+        return _GOLDEN_LOCKS.setdefault(key, threading.Lock())
+
+
+def _golden_slice_name(project: str, clone_from: str) -> str:
+    return adapters.slice_name(project, f"golden_{clone_from}")
+
+
+def _ensure_golden(adapter, svc, sname: str, wt, project: str) -> str:
+    """Build (once) the golden template from the service's migrate+seed, and return it.
+
+    The golden is a resource slice nobody owns; it's rebuilt only when migrate/seed
+    change (tracked by a hashed marker), and never torn down by a worktree remove.
+    """
+    golden = _golden_slice_name(project, svc.clone_from)
+    digest = hashlib.sha256(f"{svc.migrate}\x00{svc.seed}".encode()).hexdigest()
+    marker = paths.warren_home() / "golden" / svc.adapter.split("@", 1)[0] / golden
+    with _golden_lock(golden):
+        if marker.exists() and marker.read_text(encoding="utf-8").strip() == digest:
+            return golden  # already built at this migrate+seed
+        with contextlib.suppress(Exception):
+            adapter.teardown(golden)  # rebuild from scratch on a migrate/seed change
+        adapter.provision(golden)
+        golden_address = adapter.resolve(golden)
+        _run_hook(svc.migrate, "migrate", sname, wt, svc, golden_address)
+        _run_hook(svc.seed, "seed", sname, wt, svc, golden_address)
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(digest, encoding="utf-8")
+    return golden
+
+
 def _provision_adapters(
     reg, cfg, wt, project: str, name: str, ports: dict, services: dict
 ) -> dict[str, str]:
-    """Provision each adapter service's slice, run its migrate/seed, return addresses."""
+    """Provision each adapter service's slice and return addresses.
+
+    With ``clone_from`` (and a clone-capable adapter) the slice is a ~instant copy of
+    a golden template that already holds migrate+seed; otherwise it's provisioned and
+    migrated/seeded per worktree. A ``clone_from`` on an adapter that can't clone falls
+    back to the per-worktree path.
+    """
     addresses = {sl.service: sl.address for sl in reg.slices_for(wt.id) if sl.address}
     sl_name = adapters.slice_name(project, name)
     for sname, svc in services.items():
@@ -63,15 +108,21 @@ def _provision_adapters(
         admin = resolve.resolve(svc.admin_url, sname, ports, name) if svc.admin_url else None
         try:
             adapter = adapters.get(svc.adapter, {"admin_url": admin})
-            adapter.provision(sl_name)
+            cloned = bool(svc.clone_from) and bool(adapter.capabilities().get("clone"))
+            if cloned:
+                golden = _ensure_golden(adapter, svc, sname, wt, project)
+                adapter.clone(golden, sl_name)
+            else:
+                adapter.provision(sl_name)
             address = adapter.resolve(sl_name)
         except adapters.AdapterError as exc:
             raise RpcFault("adapter", str(exc)) from exc
         slice_row = reg.create_slice(wt.id, sname, svc.adapter)
         reg.set_slice_ready(slice_row.id, address)
         addresses[sname] = address
-        _run_hook(svc.migrate, "migrate", sname, wt, svc, address)
-        _run_hook(svc.seed, "seed", sname, wt, svc, address)
+        if not cloned:  # a cloned slice already has migrate+seed baked into the golden
+            _run_hook(svc.migrate, "migrate", sname, wt, svc, address)
+            _run_hook(svc.seed, "seed", sname, wt, svc, address)
     return addresses
 
 

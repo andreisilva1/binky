@@ -66,6 +66,9 @@ def run(adapter_cls: type[Adapter], argv: list[str] | None = None) -> int:
         elif op == "teardown":
             adapter.teardown(slice_name)
             _emit({"ok": True})
+        elif op == "clone":
+            adapter.clone(request.get("source"), request.get("dest"))
+            _emit({"ok": True})
         else:
             _emit({"ok": False, "error": f"unknown op: {op}"})
     except Exception as exc:  # any adapter failure becomes a clean protocol error

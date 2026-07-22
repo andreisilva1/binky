@@ -33,7 +33,7 @@ def _base(config: dict) -> Path:
 
 
 class FilestoreAdapter(Adapter):
-    CAPABILITIES: ClassVar[dict] = {"clone": False}
+    CAPABILITIES: ClassVar[dict] = {"clone": True}
 
     def provision(self, slice_name: str) -> None:
         (_base(self.config) / slice_name).mkdir(parents=True, exist_ok=True)
@@ -43,6 +43,10 @@ class FilestoreAdapter(Adapter):
 
     def teardown(self, slice_name: str) -> None:
         shutil.rmtree(_base(self.config) / slice_name, ignore_errors=True)
+
+    def clone(self, source_slice: str, dest_slice: str) -> None:
+        base = _base(self.config)
+        shutil.copytree(base / source_slice, base / dest_slice, dirs_exist_ok=True)
 
 
 if __name__ == "__main__":

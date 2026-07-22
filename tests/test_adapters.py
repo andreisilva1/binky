@@ -74,6 +74,107 @@ def test_adapter_provision_and_teardown(tmp_path, monkeypatch) -> None:
         reg.close()
 
 
+def _init_git(proj: Path) -> None:
+    _git(proj, "init", "-q")
+    _git(proj, "add", "-A")
+    _git(proj, "-c", "user.email=t@e", "-c", "user.name=t", "commit", "-q", "-m", "i")
+
+
+def test_clone_from_builds_golden_once_then_clones(tmp_path, monkeypatch) -> None:
+    """The golden is built once (migrate runs once); each worktree is a clone of it."""
+    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    counter = tmp_path / "migrate_runs.txt"
+    monkeypatch.setenv("COUNTER", str(counter))
+
+    provisioned: list[str] = []
+    cloned: list[tuple[str, str]] = []
+
+    class CloneFake(adapters.Adapter):
+        CAPABILITIES: ClassVar[dict] = {"clone": True}
+        store: ClassVar[set[str]] = set()
+
+        def provision(self, slice_name: str) -> None:
+            provisioned.append(slice_name)
+            CloneFake.store.add(slice_name)
+
+        def resolve(self, slice_name: str) -> str:
+            return f"fake://{slice_name}"
+
+        def teardown(self, slice_name: str) -> None:
+            CloneFake.store.discard(slice_name)
+
+        def clone(self, source_slice: str, dest_slice: str) -> None:
+            cloned.append((source_slice, dest_slice))
+            CloneFake.store.add(dest_slice)
+
+    adapters.register("clonefake", CloneFake)
+    CloneFake.store.clear()
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "bump.py").write_text(
+        "import os\nopen(os.environ['COUNTER'], 'a').write('x')\n", encoding="utf-8"
+    )
+    py = sys.executable
+    (proj / "warren.toml").write_text(
+        '[project]\nname = "acme"\n'
+        '[services.db]\n'
+        'adapter = "clonefake"\n'
+        'clone_from = "golden"\n'
+        f"migrate = '\"{py}\" bump.py'\n",
+        encoding="utf-8",
+    )
+    _init_git(proj)
+
+    reg = Registry.connect(tmp_path / "home" / "warren.db")
+    pm = ProcessManager()
+    try:
+        ops.up(reg, pm, {"root": str(proj), "worktree": "a"})
+        ops.up(reg, pm, {"root": str(proj), "worktree": "b"})
+
+        golden = "acme_golden_golden"
+        assert provisioned == [golden]  # only the golden is provisioned
+        assert cloned == [(golden, "acme_a"), (golden, "acme_b")]  # each worktree cloned from it
+        assert counter.read_text(encoding="utf-8") == "x"  # migrate ran once, into the golden
+    finally:
+        pm.stop_all()
+        reg.close()
+
+
+def test_clone_from_falls_back_when_adapter_cannot_clone(tmp_path, monkeypatch) -> None:
+    """`clone_from` on a clone-less adapter degrades to per-worktree provision+migrate."""
+    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    counter = tmp_path / "migrate_runs.txt"
+    monkeypatch.setenv("COUNTER", str(counter))
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "bump.py").write_text(
+        "import os\nopen(os.environ['COUNTER'], 'a').write('x')\n", encoding="utf-8"
+    )
+    py = sys.executable
+    (proj / "warren.toml").write_text(
+        '[project]\nname = "acme"\n'
+        '[services.db]\n'
+        'adapter = "fake"\n'  # FakeAdapter has no clone capability
+        'clone_from = "golden"\n'
+        f"migrate = '\"{py}\" bump.py'\n",
+        encoding="utf-8",
+    )
+    _init_git(proj)
+
+    reg = Registry.connect(tmp_path / "home" / "warren.db")
+    pm = ProcessManager()
+    try:
+        ops.up(reg, pm, {"root": str(proj), "worktree": "a"})
+        assert "acme_a" in FakeAdapter.store  # provisioned per worktree (no golden)
+        assert "acme_golden_golden" not in FakeAdapter.store
+        assert counter.read_text(encoding="utf-8") == "x"  # migrate ran on the worktree slice
+    finally:
+        pm.stop_all()
+        reg.close()
+
+
 def test_adapter_address_injected_into_env() -> None:
     cfg = load_config_data(
         {
@@ -118,13 +219,24 @@ def test_external_adapter_protocol_roundtrip(tmp_path) -> None:
     base = tmp_path / "store"
     adapter = adapters.ExternalAdapter({"base": str(base)}, [sys.executable, str(_FILESTORE)])
 
-    assert adapter.capabilities() == {"clone": False}
+    assert adapter.capabilities() == {"clone": True}
     adapter.provision("acme_feat")
     assert (base / "acme_feat").is_dir()
     assert adapter.resolve("acme_feat").startswith("file://")
     adapter.provision("acme_feat")  # idempotent
     adapter.teardown("acme_feat")
     assert not (base / "acme_feat").exists()
+
+
+def test_external_adapter_clone(tmp_path) -> None:
+    """The clone verb round-trips through the protocol (source → dest copy)."""
+    base = tmp_path / "store"
+    adapter = adapters.ExternalAdapter({"base": str(base)}, [sys.executable, str(_FILESTORE)])
+    adapter.provision("golden")
+    (base / "golden" / "seed.txt").write_text("realistic data", encoding="utf-8")
+
+    adapter.clone("golden", "acme_feat")
+    assert (base / "acme_feat" / "seed.txt").read_text(encoding="utf-8") == "realistic data"
 
 
 def test_get_discovers_external_on_path(monkeypatch, tmp_path) -> None:
@@ -153,8 +265,15 @@ PG_URL = os.environ.get("WARREN_TEST_PG")
 def test_postgres_adapter_roundtrip() -> None:
     adapter = adapters.get("postgres", {"admin_url": PG_URL})
     name = "warren_test_slice_zzz"
+    clone = name + "_clone"
     adapter.teardown(name)  # clean slate
+    adapter.teardown(clone)
     adapter.provision(name)
     assert name in adapter.resolve(name)
     adapter.provision(name)  # idempotent
+
+    adapter.clone(name, clone)  # TEMPLATE copy
+    assert clone in adapter.resolve(clone)
+
+    adapter.teardown(clone)
     adapter.teardown(name)

@@ -52,6 +52,10 @@ class Adapter(ABC):
     @abstractmethod
     def teardown(self, slice_name: str) -> None: ...
 
+    def clone(self, source_slice: str, dest_slice: str) -> None:
+        """Copy *source_slice* into a new *dest_slice* (opt-in; gated by ``clone``)."""
+        raise AdapterError(f"{type(self).__name__} does not support clone")
+
     def capabilities(self) -> dict:
         return dict(self.CAPABILITIES)
 
@@ -71,10 +75,8 @@ class ExternalAdapter(Adapter):
         super().__init__(config)
         self._command = command
 
-    def _call(self, op: str, slice_name: str | None = None) -> dict:
-        request: dict = {"config": self.config}
-        if slice_name is not None:
-            request["slice"] = slice_name
+    def _call(self, op: str, **fields: str) -> dict:
+        request: dict = {"config": self.config, **fields}
         try:
             proc = subprocess.run(
                 [*self._command, op],
@@ -98,13 +100,16 @@ class ExternalAdapter(Adapter):
         return resp
 
     def provision(self, slice_name: str) -> None:
-        self._call("provision", slice_name)
+        self._call("provision", slice=slice_name)
 
     def resolve(self, slice_name: str) -> str:
-        return self._call("resolve", slice_name)["address"]
+        return self._call("resolve", slice=slice_name)["address"]
 
     def teardown(self, slice_name: str) -> None:
-        self._call("teardown", slice_name)
+        self._call("teardown", slice=slice_name)
+
+    def clone(self, source_slice: str, dest_slice: str) -> None:
+        self._call("clone", source=source_slice, dest=dest_slice)
 
     def capabilities(self) -> dict:
         return self._call("capabilities").get("capabilities", {})
@@ -151,6 +156,8 @@ def _with_dbname(url: str, dbname: str) -> str:
 class PostgresAdapter(Adapter):
     """One database per worktree, carved out of the user's own Postgres server."""
 
+    CAPABILITIES: ClassVar[dict] = {"clone": True}
+
     def __init__(self, config: dict) -> None:
         super().__init__(config)
         self.admin_url = config.get("admin_url") or os.environ.get("WARREN_DB_ADMIN_URL")
@@ -178,6 +185,12 @@ class PostgresAdapter(Adapter):
     def teardown(self, slice_name: str) -> None:
         with self._connect() as conn:
             conn.execute(f'DROP DATABASE IF EXISTS "{slice_name}" WITH (FORCE)')
+
+    def clone(self, source_slice: str, dest_slice: str) -> None:
+        # file-level copy of the whole database — ~constant time regardless of size.
+        # Requires no active connections to the template (agents use their own slices).
+        with self._connect() as conn:
+            conn.execute(f'CREATE DATABASE "{dest_slice}" TEMPLATE "{source_slice}"')
 
 
 register("postgres", PostgresAdapter)
