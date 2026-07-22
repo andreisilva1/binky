@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Binky — one isolated world per git worktree</title>
+<meta name="description" content="Binky gives every git worktree its own ports, env, database and URLs, so a swarm of coding agents runs in parallel on one machine without collisions." />
+<meta name="color-scheme" content="light" />
+<link rel="stylesheet" href="styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🐇</text></svg>" />
+</head>
+<body>
+
+<!-- flat iconic rabbit, defined once, reused via <use> -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="rabbit" viewBox="0 0 64 64">
+    <g fill="currentColor" fill-rule="evenodd">
+      <!-- left ear -->
+      <g transform="translate(18 3) rotate(-10 6 32)">
+        <path d="M6,0 a6,6 0 0,1 6,6 L12,26 a6,6 0 0,1 -12,0 L0,6 a6,6 0 0,1 6,-6 Z
+                 M6,6.5 a2.5,2.5 0 0,1 2.5,2.5 L8.5,23.5 a2.5,2.5 0 0,1 -5,0 L3.5,9 a2.5,2.5 0 0,1 2.5,-2.5 Z" />
+      </g>
+      <!-- right ear -->
+      <g transform="translate(34 3) rotate(10 6 32)">
+        <path d="M6,0 a6,6 0 0,1 6,6 L12,26 a6,6 0 0,1 -12,0 L0,6 a6,6 0 0,1 6,-6 Z
+                 M6,6.5 a2.5,2.5 0 0,1 2.5,2.5 L8.5,23.5 a2.5,2.5 0 0,1 -5,0 L3.5,9 a2.5,2.5 0 0,1 2.5,-2.5 Z" />
+      </g>
+      <!-- head + cut-out eyes + nose -->
+      <path d="M15,41 a17,17 0 1,0 34,0 a17,17 0 1,0 -34,0 Z
+               M22.4,41 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z
+               M36.4,41 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z
+               M32,50.5 L28.6,46.2 L35.4,46.2 Z" />
+    </g>
+  </symbol>
+</svg>
+
+<header class="nav" id="nav">
+  <div class="container nav-inner">
+    <a class="brand" href="./index.html">
+      <svg class="rabbit" aria-hidden="true"><use href="#rabbit" /></svg>
+      <span class="wordmark">binky</span>
+    </a>
+    <nav class="nav-links">
+      <a href="#what" class="hide-sm">What it is</a>
+      <a href="#use" class="hide-sm">Usage</a>
+      <a href="#adapters" class="hide-sm">Adapters</a>
+      <a href="./docs.html">Docs</a>
+      <a href="https://github.com/andreisilva1/binky" class="gh" rel="noopener">GitHub&nbsp;↗</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <!-- ---------------------------------------------------------------- hero -->
+  <section class="hero" id="top">
+    <div class="bg-motion" aria-hidden="true">
+      <div class="blob b1"></div>
+      <div class="blob b2"></div>
+      <div class="blob b3"></div>
+    </div>
+    <div class="hero-grid" aria-hidden="true"></div>
+
+    <div class="container hero-inner">
+      <svg class="rabbit-lg rise d1" aria-hidden="true"><use href="#rabbit" /></svg>
+
+      <div class="eyebrow rise d2">MIT · Python 3.11+ · macOS · Linux · Windows</div>
+
+      <h1 class="rise d2">One isolated world <span class="dim">per worktree.</span></h1>
+
+      <p class="lede rise d3">
+        Binky gives every git worktree its own ports, environment, database and URLs — so ten
+        agents (or ten of you) can run the whole stack in parallel on one machine and never
+        collide.
+      </p>
+
+      <div class="cta-row rise d4">
+        <button class="cmd-chip" id="install" type="button" data-copy="uv tool install binky">
+          <span class="prompt">$</span><span>uv tool install binky</span><span class="copy">copy</span>
+        </button>
+        <a class="btn" href="./docs.html">Read the docs <span class="arrow">→</span></a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------- what it is -->
+  <section id="what">
+    <div class="container">
+      <div class="split">
+        <div class="prose reveal">
+          <div class="sec-label">What it is</div>
+          <h2 class="sec-title">A local control plane for parallel branches.</h2>
+          <p>
+            Git worktrees already give you N checkouts of one repo. What they don't give you is
+            <strong>N running stacks</strong>. Every branch still wants port 3000, still wants the
+            same database, still writes to the same <code>.env</code>. So you serialise: one branch
+            at a time.
+          </p>
+          <p>
+            Binky removes that. It reads a single <strong><code>binky.toml</code></strong> at the
+            root of your repo and, for each worktree, allocates a free port block, provisions an
+            isolated database, renders the environment, starts and supervises your services, and
+            fronts them behind stable per-worktree URLs.
+          </p>
+          <p>
+            It runs as an always-alive local daemon with a SQLite registry, so state survives your
+            terminal closing. It restarts what crashes, reaps what dies, and admits new worktrees
+            only while the machine has RAM to spare. <strong>No Docker required</strong> — your
+            processes run natively, exactly as they do today.
+          </p>
+        </div>
+
+        <div class="code-card reveal">
+          <div class="cc-head">binky.toml</div>
+<pre><code><span class="tok-sec">[project]</span>
+<span class="tok-key">name</span>  = <span class="tok-str">"acme"</span>
+<span class="tok-key">https</span> = <span class="tok-str">true</span>          <span class="tok-cmt"># https://web.&lt;wt&gt;.acme.localhost</span>
+
+<span class="tok-sec">[services.db]</span>
+<span class="tok-key">adapter</span>   = <span class="tok-str">"postgres"</span>
+<span class="tok-key">admin_url</span> = <span class="tok-str">"${env.PG_ADMIN_URL}"</span>
+<span class="tok-key">migrate</span>   = <span class="tok-str">"pnpm prisma migrate deploy"</span>
+<span class="tok-key">seed</span>      = <span class="tok-str">"pnpm seed"</span>
+<span class="tok-key">clone_from</span> = <span class="tok-str">"golden"</span>  <span class="tok-cmt"># built once → cloned per worktree</span>
+
+<span class="tok-sec">[services.api]</span>
+<span class="tok-key">cmd</span>        = <span class="tok-str">"uv run api --port ${self.port}"</span>
+<span class="tok-key">depends_on</span> = [<span class="tok-str">"db"</span>]
+<span class="tok-key">health</span>     = <span class="tok-str">"http://localhost:${self.port}/healthz"</span>
+
+<span class="tok-sec">[services.web]</span>
+<span class="tok-key">cmd</span>   = <span class="tok-str">"pnpm dev --port ${self.port}"</span>
+<span class="tok-key">url</span>   = <span class="tok-str">true</span>
+<span class="tok-key">watch</span> = [<span class="tok-str">"web/**"</span>]
+
+<span class="tok-sec">[agents]</span>
+<span class="tok-key">expose</span> = [<span class="tok-str">"web"</span>, <span class="tok-str">"api"</span>, <span class="tok-str">"db"</span>]
+<span class="tok-key">verify</span> = [<span class="tok-str">"pnpm test"</span>, <span class="tok-str">"pnpm lint"</span>]
+</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ---------------------------------------------------------------- usage -->
+  <section id="use">
+    <div class="container">
+      <div class="reveal">
+        <div class="sec-label">How you use it</div>
+        <h2 class="sec-title">Fourteen verbs. Nothing to learn twice.</h2>
+        <p class="sec-lead">
+          Commit <code>binky.toml</code> once. From then on every branch — yours or an agent's —
+          gets a full stack with a single command, and gives it all back with another.
+        </p>
+      </div>
+
+      <div class="cmd-list reveal">
+        <div class="cmd-item"><code>binky init</code><span>Write a starting <code>binky.toml</code> from your <code>docker-compose.yml</code>.</span></div>
+        <div class="cmd-item"><code>binky check</code><span>Validate the config and flag footguns before anything runs.</span></div>
+        <div class="cmd-item"><code>binky up &lt;wt&gt;</code><span>Create the worktree, allocate ports, provision the DB, start services.</span></div>
+        <div class="cmd-item"><code>binky down &lt;wt&gt;</code><span>Stop the processes, keep the files, ports and data.</span></div>
+        <div class="cmd-item"><code>binky remove &lt;wt&gt;</code><span>Tear it all down — worktree, database, ports, logs.</span></div>
+        <div class="cmd-item"><code>binky status</code><span>Every worktree on the machine, live: state, services, ports.</span></div>
+        <div class="cmd-item"><code>binky env &lt;wt&gt;</code><span>Print the live coordinates as JSON or <code>.env</code>.</span></div>
+        <div class="cmd-item"><code>binky verify &lt;wt&gt;</code><span>Run the project's checks; records pass/fail on the worktree.</span></div>
+        <div class="cmd-item"><code>binky logs &lt;wt&gt;</code><span>Captured stdout/stderr per service, rotated and retained.</span></div>
+        <div class="cmd-item"><code>binky dashboard</code><span>Live TUI over the whole binky.</span></div>
+        <div class="cmd-item"><code>binky doctor</code><span>Diagnose the install and daemon; non-zero when something's wrong.</span></div>
+        <div class="cmd-item"><code>binky mcp</code><span>Expose the same verbs as MCP tools, for agents.</span></div>
+      </div>
+
+      <div class="grid3">
+        <div class="feat reveal">
+          <span class="k">FOR ONE DEVELOPER</span>
+          <h3>Stop rebasing to review</h3>
+          <p>Bring up the PR branch next to your feature branch, both fully running, and switch by opening a different URL.</p>
+        </div>
+        <div class="feat reveal">
+          <span class="k">FOR A SWARM OF AGENTS</span>
+          <h3>Parallel without collisions</h3>
+          <p><code>binky env</code> hands each agent its own ports and database URL; <code>binky verify</code> is the gate its work has to pass.</p>
+        </div>
+        <div class="feat reveal">
+          <span class="k">FOR A TEAM</span>
+          <h3>One file, every machine</h3>
+          <p>The stack definition lives in the repo. New hire clones, runs <code>binky up</code>, and is running in minutes — Linux, macOS or Windows.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------- internals -->
+  <section id="how">
+    <div class="container">
+      <div class="reveal">
+        <div class="sec-label">Under the hood</div>
+        <h2 class="sec-title">Boring machinery, on purpose.</h2>
+      </div>
+
+      <div class="grid3">
+        <div class="feat reveal">
+          <span class="k">PORTS</span>
+          <h3>Resolve, then launch</h3>
+          <p>A machine-global allocator reserves a block per worktree and only hands it out after confirming nothing else holds it. No <code>EADDRINUSE</code> roulette.</p>
+        </div>
+        <div class="feat reveal">
+          <span class="k">DATABASES</span>
+          <h3>Golden template, cloned</h3>
+          <p>Your own migrate+seed builds a golden database once. Each worktree gets a copy in milliseconds, and a hash marker rebuilds it when migrations change.</p>
+        </div>
+        <div class="feat reveal">
+          <span class="k">PROCESSES</span>
+          <h3>Supervised, not just spawned</h3>
+          <p>Exits are reaped live, restarts follow a policy with exponential backoff and a give-up cap, and health probes run continuously.</p>
+        </div>
+        <div class="feat reveal">
+          <span class="k">ROUTING</span>
+          <h3>Stable URLs</h3>
+          <p>An embedded reverse proxy maps <code>&lt;service&gt;.&lt;worktree&gt;.&lt;project&gt;.localhost</code> to whatever port the service got — optionally over HTTPS via a local CA.</p>
+        </div>
+        <div class="feat reveal">
+          <span class="k">ADMISSION</span>
+          <h3>Your laptop survives</h3>
+          <p>New worktrees queue FIFO against real available RAM instead of thrashing the machine into swap.</p>
+        </div>
+        <div class="feat reveal">
+          <span class="k">OBSERVABILITY</span>
+          <h3>Answerable questions</h3>
+          <p>A JSON-lines event log, point-in-time <code>metrics</code>, and a <code>doctor</code> that tells you what's broken instead of what's fine.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------- adapters -->
+  <section id="adapters" class="adapters">
+    <div class="container">
+      <div class="reveal">
+        <div class="sec-label">Adapters</div>
+        <h2 class="sec-title" style="margin-inline:auto">Whatever your stack already runs.</h2>
+        <p class="sec-lead" style="margin-inline:auto">
+          An adapter teaches Binky how to provision, resolve and tear down one kind of resource.
+          First-party adapters ship in the repo and are tested in CI; anything else can be a
+          standalone executable in any language, speaking a small JSON protocol.
+        </p>
+      </div>
+
+      <div class="adapter-strip reveal">
+        <span class="chip">PostgreSQL</span>
+        <span class="chip">MySQL</span>
+        <span class="chip">MariaDB</span>
+        <span class="chip">Percona</span>
+        <span class="chip">MongoDB</span>
+        <span class="chip">Redis</span>
+        <span class="chip">Valkey</span>
+        <span class="chip">S3 / MinIO</span>
+        <span class="chip">RabbitMQ</span>
+        <span class="chip">Kafka / Redpanda</span>
+        <span class="chip">Qdrant</span>
+        <span class="chip">ClickHouse</span>
+        <span class="chip">Elasticsearch</span>
+        <span class="chip">OpenSearch</span>
+      </div>
+      <p class="note">every one of these is tested against a real server in CI</p>
+    </div>
+  </section>
+
+  <!-- ------------------------------------------------------------------ cta -->
+  <section id="start" style="border-bottom:none">
+    <div class="container" style="text-align:center">
+      <div class="reveal">
+        <div class="sec-label">Get started</div>
+        <h2 class="sec-title" style="margin-inline:auto">Three minutes to your first worktree.</h2>
+      </div>
+      <div class="cta-row reveal" style="margin-top:32px">
+        <button class="cmd-chip" type="button" data-copy="uv tool install binky">
+          <span class="prompt">$</span><span>uv tool install binky</span><span class="copy">copy</span>
+        </button>
+        <a class="btn" href="./docs.html">Documentation <span class="arrow">→</span></a>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="container foot-inner">
+    <a class="foot-brand" href="#top">
+      <svg class="rabbit" aria-hidden="true"><use href="#rabbit" /></svg>
+      <span>binky <span class="gloss">(n.) the mid-air twist a rabbit does when it has room to run</span> — MIT licensed</span>
+    </a>
+    <nav class="foot-links">
+      <a href="./docs.html">Docs</a>
+      <a href="https://github.com/andreisilva1/binky" rel="noopener">GitHub</a>
+      <a href="https://github.com/andreisilva1/binky/blob/main/CHANGELOG.md" rel="noopener">Changelog</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>

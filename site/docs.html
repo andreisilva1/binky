@@ -1,0 +1,699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Docs — Binky</title>
+<meta name="description" content="Binky documentation: install, binky.toml, ports and URLs, adapters and golden templates, the CLI, the MCP server, and troubleshooting." />
+<meta name="color-scheme" content="light" />
+<link rel="stylesheet" href="styles.css" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🐇</text></svg>" />
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="rabbit" viewBox="0 0 64 64">
+    <g fill="currentColor" fill-rule="evenodd">
+      <g transform="translate(18 3) rotate(-10 6 32)">
+        <path d="M6,0 a6,6 0 0,1 6,6 L12,26 a6,6 0 0,1 -12,0 L0,6 a6,6 0 0,1 6,-6 Z
+                 M6,6.5 a2.5,2.5 0 0,1 2.5,2.5 L8.5,23.5 a2.5,2.5 0 0,1 -5,0 L3.5,9 a2.5,2.5 0 0,1 2.5,-2.5 Z" />
+      </g>
+      <g transform="translate(34 3) rotate(10 6 32)">
+        <path d="M6,0 a6,6 0 0,1 6,6 L12,26 a6,6 0 0,1 -12,0 L0,6 a6,6 0 0,1 6,-6 Z
+                 M6,6.5 a2.5,2.5 0 0,1 2.5,2.5 L8.5,23.5 a2.5,2.5 0 0,1 -5,0 L3.5,9 a2.5,2.5 0 0,1 2.5,-2.5 Z" />
+      </g>
+      <path d="M15,41 a17,17 0 1,0 34,0 a17,17 0 1,0 -34,0 Z
+               M22.4,41 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z
+               M36.4,41 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z
+               M32,50.5 L28.6,46.2 L35.4,46.2 Z" />
+    </g>
+  </symbol>
+</svg>
+
+<header class="nav" id="nav">
+  <div class="container nav-inner">
+    <a class="brand" href="./index.html">
+      <svg class="rabbit" aria-hidden="true"><use href="#rabbit" /></svg>
+      <span class="wordmark">binky</span>
+    </a>
+    <nav class="nav-links">
+      <a href="./index.html#what" class="hide-sm">What it is</a>
+      <a href="./index.html#use" class="hide-sm">Usage</a>
+      <a href="./index.html#adapters" class="hide-sm">Adapters</a>
+      <a href="./docs.html">Docs</a>
+      <a href="https://github.com/andreisilva1/binky" class="gh" rel="noopener">GitHub&nbsp;↗</a>
+    </nav>
+  </div>
+</header>
+
+<main class="docs-main">
+  <div class="container docs-shell">
+
+    <aside class="docs-side" id="toc">
+      <p class="grp">Getting started</p>
+      <a href="#install">Install</a>
+      <a href="#first">Your first worktree</a>
+      <a href="#toml">binky.toml</a>
+
+      <p class="grp" style="margin-top:28px">Guides</p>
+      <a href="#ports">Ports &amp; URLs</a>
+      <a href="#databases">Databases &amp; golden templates</a>
+      <a href="#supervision">Supervision &amp; health</a>
+      <a href="#agents">Agents: env &amp; verify</a>
+
+      <p class="grp" style="margin-top:28px">Reference</p>
+      <a href="#cli">CLI</a>
+      <a href="#adapters">Adapters</a>
+      <a href="#mcp">MCP server</a>
+      <a href="#cost">What N worlds cost</a>
+      <a href="#security">Security</a>
+      <a href="#troubleshooting">Troubleshooting</a>
+    </aside>
+
+    <div class="docs-body">
+
+      <!-- ------------------------------------------------------------ install -->
+      <section>
+        <h2 id="install">Install</h2>
+        <p class="lede-xl">
+          Binky needs Python 3.11+ and git. It runs on macOS, Linux and Windows — all three are
+          tested in CI on every push.
+        </p>
+<pre><code><span class="tok-cmd">uv tool install</span> binky       <span class="tok-cmt"># or: pipx install binky</span>
+<span class="tok-cmd">binky</span> <span class="tok-flag">--version</span>
+</code></pre>
+        <p>Or from a clone, to run the unreleased <code>main</code> or to hack on it:</p>
+<pre><code><span class="tok-cmd">git clone</span> https://github.com/andreisilva1/binky <span class="tok-flag">&amp;&amp;</span> <span class="tok-cmd">cd</span> binky
+<span class="tok-cmd">uv tool install</span> .              <span class="tok-cmt"># or: pipx install .</span>
+</code></pre>
+        <p>
+          Adapters that need a database driver ship as extras — installing Binky for Redis
+          shouldn't drag in <code>boto3</code>:
+        </p>
+<pre><code><span class="tok-cmd">uv tool install</span> <span class="tok-str">"binky[postgres]"</span>       <span class="tok-cmt"># or [redis] [mysql] [mongodb] [s3] [kafka]</span>
+<span class="tok-cmd">uv tool install</span> <span class="tok-str">"binky[all-adapters]"</span>   <span class="tok-cmt"># the whole matrix</span>
+</code></pre>
+        <p>
+          <code>rabbitmq</code>, <code>qdrant</code>, <code>clickhouse</code> and
+          <code>elasticsearch</code> need no extra at all — they drive plain HTTP.
+        </p>
+        <p>
+          Binky does not run your databases. It carves an isolated slice out of a server you
+          already run, wherever that is: a local install, a container, a shared dev host.
+        </p>
+      </section>
+
+      <!-- -------------------------------------------------------------- first -->
+      <section>
+        <h2 id="first">Your first worktree</h2>
+        <p>
+          If the repo already has a <code>docker-compose.yml</code>, start from it rather than from
+          a blank file:
+        </p>
+<pre><code><span class="tok-cmd">binky init</span>       <span class="tok-cmt"># writes a binky.toml you can read and edit</span>
+<span class="tok-cmd">binky check</span>      <span class="tok-cmt"># validate it, and flag footguns</span>
+</code></pre>
+        <p>
+          <code>init</code> reads <code>docker-compose.yml</code> and the <em>key names</em> in
+          <code>.env</code> — never their values — and maps images onto adapters. It has two hard
+          rules: what it writes always passes <code>binky check</code>, and it never copies a
+          secret into the file. Where compose says how to run something <em>in a container</em> and
+          Binky would need the command to run it <em>on the host</em>, it writes the block
+          commented with a TODO instead of guessing.
+        </p>
+        <p>Then bring worktrees up, as many as you like, at the same time:</p>
+<pre><code><span class="tok-cmd">binky up</span> login-fix
+<span class="tok-cmd">binky up</span> checkout-v2
+
+<span class="tok-cmd">binky status</span>            <span class="tok-cmt"># every worktree on the machine, grouped by project</span>
+<span class="tok-cmd">binky env</span> login-fix     <span class="tok-cmt"># its live coordinates, for you or an agent</span>
+<span class="tok-cmd">binky down</span> login-fix    <span class="tok-cmt"># pause: keeps files and ports; `up` again is instant</span>
+<span class="tok-cmd">binky remove</span> login-fix  <span class="tok-cmt"># destroy it (refuses if there are uncommitted changes)</span>
+</code></pre>
+        <p>
+          Each <code>up</code> creates or reuses a git worktree for that branch, allocates a port
+          block, provisions an isolated database, renders the environment, starts the services in
+          dependency order, and registers the URLs. Nothing is hardcoded and nothing is discovered
+          at runtime.
+        </p>
+      </section>
+
+      <!-- --------------------------------------------------------------- toml -->
+      <section>
+        <h2 id="toml">binky.toml</h2>
+        <p>
+          One file at the root of the repo, committed. Unknown keys are rejected, so a typo fails
+          loudly instead of being ignored.
+        </p>
+<pre><code><span class="tok-sec">[project]</span>
+<span class="tok-key">name</span>  = <span class="tok-str">"acme"</span>
+<span class="tok-key">https</span> = <span class="tok-str">true</span>                     <span class="tok-cmt"># optional: TLS via Caddy, when Caddy is on PATH</span>
+
+<span class="tok-sec">[services.db]</span>
+<span class="tok-key">adapter</span>    = <span class="tok-str">"postgres"</span>
+<span class="tok-key">admin_url</span>  = <span class="tok-str">"${env.PG_ADMIN_URL}"</span>   <span class="tok-cmt"># never a literal credential</span>
+<span class="tok-key">migrate</span>    = <span class="tok-str">"pnpm prisma migrate deploy"</span>
+<span class="tok-key">seed</span>       = <span class="tok-str">"pnpm seed"</span>
+<span class="tok-key">clone_from</span> = <span class="tok-str">"golden"</span>              <span class="tok-cmt"># built once → copied per worktree</span>
+
+<span class="tok-sec">[services.api]</span>
+<span class="tok-key">cmd</span>        = <span class="tok-str">"uv run api --port ${self.port}"</span>
+<span class="tok-key">depends_on</span> = [<span class="tok-str">"db"</span>]
+<span class="tok-key">env</span>        = { <span class="tok-key">DATABASE_URL</span> = <span class="tok-str">"${db.url}"</span> }
+<span class="tok-key">health</span>     = <span class="tok-str">"http://localhost:${self.port}/healthz"</span>
+
+<span class="tok-sec">[services.web]</span>
+<span class="tok-key">cmd</span>   = <span class="tok-str">"pnpm dev --port ${self.port}"</span>
+<span class="tok-key">url</span>   = <span class="tok-str">"web"</span>                      <span class="tok-cmt"># → web.&lt;worktree&gt;.acme.localhost</span>
+<span class="tok-key">watch</span> = [<span class="tok-str">"web/**"</span>]
+
+<span class="tok-sec">[agents]</span>
+<span class="tok-key">expose</span> = [<span class="tok-str">"web"</span>, <span class="tok-str">"api"</span>, <span class="tok-str">"db"</span>]     <span class="tok-cmt"># service names, not fields</span>
+<span class="tok-key">verify</span> = [<span class="tok-str">"pnpm test"</span>, <span class="tok-str">"pnpm lint"</span>]
+</code></pre>
+
+        <h3>A service is a process or a resource, never both</h3>
+        <p>
+          Exactly one of <code>cmd</code> or <code>adapter</code>. A <code>cmd</code> service is a
+          process Binky starts and supervises. An <code>adapter</code> service is a slice Binky
+          asks some server to carve out — and keys like <code>migrate</code>, <code>seed</code> and
+          <code>clone_from</code> are only valid there.
+        </p>
+
+        <h3>The keys</h3>
+        <div class="tw">
+        <table>
+          <thead><tr><th>Key</th><th>Where</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>name</code></td><td>project</td><td>Namespaces worktrees, slices and the default domain.</td></tr>
+            <tr><td><code>domain</code></td><td>project</td><td>Defaults to <code>&lt;name&gt;.localhost</code>.</td></tr>
+            <tr><td><code>port_range</code></td><td>project</td><td><code>[low, high]</code> Binky allocates from.</td></tr>
+            <tr><td><code>max_parallel</code></td><td>project</td><td>Admission cap. Defaults to something derived from your RAM.</td></tr>
+            <tr><td><code>https</code></td><td>project</td><td>Front the proxy with Caddy for TLS via a local CA.</td></tr>
+            <tr><td><code>cmd</code></td><td>service</td><td>The process to run. Tokens are resolved before launch.</td></tr>
+            <tr><td><code>setup</code></td><td>service</td><td>Run once when the worktree is created (<code>pnpm install</code>).</td></tr>
+            <tr><td><code>url</code></td><td>service</td><td><code>true</code>, a subdomain string, or <code>{label = sub}</code>.</td></tr>
+            <tr><td><code>ports</code></td><td>service</td><td>Extra named ports beyond the primary one.</td></tr>
+            <tr><td><code>health</code></td><td>service</td><td>An http URL, or a table with <code>http</code>/<code>tcp</code>/<code>cmd</code>.</td></tr>
+            <tr><td><code>depends_on</code></td><td>service</td><td>Start order, and what lands in this service's env.</td></tr>
+            <tr><td><code>env</code>, <code>env_file</code></td><td>service</td><td>Extra environment, tokens resolved.</td></tr>
+            <tr><td><code>watch</code></td><td>service</td><td>Globs that trigger a restart.</td></tr>
+            <tr><td><code>restart</code></td><td>service</td><td><code>on-failure</code> (default), <code>always</code>, <code>never</code>.</td></tr>
+            <tr><td><code>shared</code></td><td>service</td><td>One instance across every worktree, instead of one each.</td></tr>
+            <tr><td><code>adapter</code></td><td>resource</td><td>Which adapter carves the slice.</td></tr>
+            <tr><td><code>admin_url</code></td><td>resource</td><td>The server to carve it from. Use <code>${env.NAME}</code>.</td></tr>
+            <tr><td><code>migrate</code>, <code>seed</code></td><td>resource</td><td>Commands run against a fresh slice.</td></tr>
+            <tr><td><code>clone_from</code></td><td>resource</td><td>Build a golden template once, copy it per worktree.</td></tr>
+            <tr><td><code>options</code></td><td>resource</td><td>Free-form per-adapter settings, passed through verbatim.</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="callout">
+          <span class="k">The one rule</span>
+          <p>
+            Never put a credential inline in a committed <code>binky.toml</code>. Use
+            <code>${env.NAME}</code> or an <code>env_file</code>. <code>binky check</code> warns
+            when you do, and <code>binky init</code> never writes one.
+          </p>
+        </div>
+      </section>
+
+      <!-- -------------------------------------------------------------- ports -->
+      <section>
+        <h2 id="ports">Ports &amp; URLs</h2>
+        <p>
+          Ports are the thing that breaks first when two branches run at once, so Binky does not
+          leave them to chance. A machine-global allocator reserves a block for the worktree
+          <strong>before any process starts</strong>, confirms nothing else holds it, and then
+          injects the whole map into every service — its own ports and its dependencies'. Nobody
+          discovers a port at runtime, because there is nothing left to discover.
+        </p>
+
+        <h3>Tokens</h3>
+        <div class="tw">
+        <table>
+          <thead><tr><th>Token</th><th>Resolves to</th></tr></thead>
+          <tbody>
+            <tr><td><code>${self.port}</code></td><td>This service's primary port.</td></tr>
+            <tr><td><code>${self.&lt;label&gt;}</code></td><td>One of its named extra ports.</td></tr>
+            <tr><td><code>${api.port}</code></td><td>Another service's primary port.</td></tr>
+            <tr><td><code>${api.url}</code></td><td><code>http://localhost:&lt;its port&gt;</code>.</td></tr>
+            <tr><td><code>${db.url}</code></td><td>An adapter service's connection string.</td></tr>
+            <tr><td><code>${worktree}</code></td><td>The worktree name.</td></tr>
+            <tr><td><code>${env.NAME}</code></td><td>A variable from the daemon's environment.</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p>
+          Every service also gets <code>$PORT</code> in its environment, for frameworks that read
+          it. Tokens Binky doesn't recognise are left alone rather than blanked, so a
+          <code>${...}</code> your own tooling owns survives untouched.
+        </p>
+
+        <div class="callout">
+          <span class="k">Read this one</span>
+          <p>
+            Binky can hand a service a port; it cannot make a framework listen on it. If your dev
+            server has its own hardcoded default, pass the port explicitly —
+            <code>cmd = "pnpm dev --port ${self.port}"</code>, not <code>"pnpm dev"</code>. This is
+            the single most common cause of "two worktrees collide even with Binky".
+          </p>
+        </div>
+
+        <h3>URLs</h3>
+        <p>
+          A service with <code>url</code> set gets a stable hostname through Binky's embedded
+          reverse proxy: <code>&lt;service&gt;.&lt;worktree&gt;.&lt;project&gt;.localhost</code>.
+          WebSockets and HMR are proxied too, so a dev server behaves normally behind it. The
+          hostname is stable across restarts even though the port behind it may not be.
+        </p>
+        <p>
+          Set <code>https = true</code> and Binky fronts the proxy with <strong>Caddy</strong> for
+          TLS from a local CA — <em>when Caddy is on <code>PATH</code></em>. When it isn't, Binky
+          logs it and http keeps working. A missing optional binary degrades; it does not break
+          <code>up</code>.
+        </p>
+      </section>
+
+      <!-- ---------------------------------------------------------- databases -->
+      <section>
+        <h2 id="databases">Databases &amp; golden templates</h2>
+        <p>
+          The naive way to give N branches N databases is to run N database servers. That costs N
+          times one server, and it is the cost Binky exists to remove. An <strong>adapter</strong>
+          carves an isolated slice out of <em>one</em> server you already run: a database, a key
+          prefix, a bucket, a vhost, an index prefix.
+        </p>
+<pre><code><span class="tok-sec">[services.db]</span>
+<span class="tok-key">adapter</span>   = <span class="tok-str">"postgres"</span>
+<span class="tok-key">admin_url</span> = <span class="tok-str">"${env.PG_ADMIN_URL}"</span>
+</code></pre>
+        <p>
+          On <code>up</code>, that becomes a database named after the project and worktree, and
+          <code>${db.url}</code> resolves to its connection string. On <code>remove</code>, it is
+          dropped.
+        </p>
+
+        <h3><code>clone_from</code>: pay for migrate+seed once</h3>
+        <p>
+          Migrations and seeds are usually the slowest part of standing a world up, and running
+          them per worktree means paying the same cost over and over for the same result. With
+          <code>clone_from</code>, the first <code>binky up</code> builds a <strong>golden
+          template</strong> — provision, migrate, seed — and every worktree after that is a
+          server-side copy of it.
+        </p>
+        <p>
+          The template is keyed by a hash of your <code>migrate</code> and <code>seed</code>
+          commands, so changing either rebuilds it automatically. Supported where the server can
+          copy a slice itself: <code>postgres</code>, <code>mysql</code>, <code>mariadb</code>,
+          <code>percona</code>, <code>mongodb</code>.
+        </p>
+        <p>
+          Where it isn't supported, or where a clone fails on something environmental — a client
+          binary too old to authenticate, a missing grant — Binky <strong>falls back</strong> to
+          provision+migrate+seed for that worktree and logs <code>clone_fallback</code>.
+          Correctness never depends on cloning. Only speed does.
+        </p>
+
+        <div class="callout">
+          <span class="k">Sharpest edge in the feature</span>
+          <p>
+            The hash covers the migrate and seed <em>commands</em>, not the files they call.
+            Editing <code>migrations/007_x.sql</code> does not change <code>"make migrate"</code>,
+            so nothing rebuilds and your new worktrees get the old schema. Delete the marker under
+            <code>~/.binky/golden/&lt;adapter&gt;/&lt;project&gt;_golden_&lt;clone_from&gt;</code>
+            to force a rebuild — or put something command-visible in the hook, like a version or a
+            checksum, so the hash moves when your schema does.
+          </p>
+        </div>
+      </section>
+
+      <!-- -------------------------------------------------------- supervision -->
+      <section>
+        <h2 id="supervision">Supervision &amp; health</h2>
+        <p>
+          Binky starts services in <code>depends_on</code> order and waits for each one to be
+          healthy before starting what depends on it. A service with no <code>health</code> is
+          considered up once its process is up; give it a probe and Binky waits for the probe.
+        </p>
+<pre><code><span class="tok-key">health</span> = <span class="tok-str">"http://localhost:${self.port}/healthz"</span>          <span class="tok-cmt"># shorthand</span>
+
+<span class="tok-sec">[services.api.health]</span>                                <span class="tok-cmt"># or the table form</span>
+<span class="tok-key">tcp</span>     = <span class="tok-str">"localhost:${self.port}"</span>
+<span class="tok-key">timeout</span> = <span class="tok-str">"30s"</span>
+</code></pre>
+        <p>
+          Exits are reaped as they happen, not polled for. Restarts follow the
+          <code>restart</code> policy with exponential backoff and a give-up cap, so a service that
+          is genuinely broken stops instead of spinning. Everything a service writes to stdout and
+          stderr is captured per worktree and per service — <code>binky logs &lt;worktree&gt;</code>
+          — and the log directory is rotated and retained so it doesn't grow without limit.
+        </p>
+        <p>
+          The daemon that does all this is machine-global and always alive. It survives your
+          terminal closing, and it reconciles on the way back up: when it restarts it re-adopts the
+          processes that are still running rather than orphaning or duplicating them.
+        </p>
+        <p>
+          New worktrees are admitted through a FIFO queue bounded by <code>max_parallel</code>
+          <em>and</em> real free RAM. Point twenty agents at a laptop and they queue, instead of
+          taking the machine into swap.
+        </p>
+      </section>
+
+      <!-- ------------------------------------------------------------- agents -->
+      <section>
+        <h2 id="agents">Agents: env &amp; verify</h2>
+        <p>
+          An agent working in a worktree needs two things from Binky: where its world is, and
+          whether its work is any good. That's the whole <code>[agents]</code> section.
+        </p>
+<pre><code><span class="tok-sec">[agents]</span>
+<span class="tok-key">expose</span> = [<span class="tok-str">"web"</span>, <span class="tok-str">"api"</span>, <span class="tok-str">"db"</span>]
+<span class="tok-key">verify</span> = [<span class="tok-str">"pnpm test"</span>, <span class="tok-str">"pnpm lint"</span>]
+</code></pre>
+        <p>
+          <code>expose</code> lists <strong>service names</strong> — not fields. A resource yields
+          its address, a <code>url</code> service yields its proxied URL, anything else yields
+          <code>http://localhost:&lt;port&gt;</code>. That curated set is what
+          <code>binky env</code> prints, and nothing else leaks:
+        </p>
+<pre><code><span class="tok-cmd">binky env</span> login-fix
+<span class="tok-out">{"web": "http://web.login-fix.acme.localhost",
+ "api": "http://localhost:41003",
+ "db":  "postgresql://…/acme_login_fix"}</span>
+
+<span class="tok-cmt"># or straight into a shell</span>
+<span class="tok-cmd">eval</span> <span class="tok-str">"$(binky env login-fix --dotenv)"</span>
+</code></pre>
+        <p>
+          <code>verify</code> is the gate. <code>binky verify &lt;worktree&gt;</code> runs each
+          check inside the worktree with the exposed coordinates in its environment, records
+          pass/fail against the worktree, and exits non-zero on failure — so an agent can call it
+          at its "done" moment and find out it isn't done.
+        </p>
+        <p>
+          Agents that speak MCP don't need the CLI at all. See <a href="#mcp">the MCP server</a>.
+        </p>
+      </section>
+
+      <!-- ---------------------------------------------------------------- cli -->
+      <section>
+        <h2 id="cli">CLI</h2>
+        <div class="tw">
+        <table>
+          <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+          <tbody>
+            <tr><td><code>binky init [dir] [--force]</code></td><td>Write a starting <code>binky.toml</code> from <code>docker-compose.yml</code> + <code>.env</code>.</td></tr>
+            <tr><td><code>binky check [path]</code></td><td>Validate a <code>binky.toml</code> and flag footguns.</td></tr>
+            <tr><td><code>binky up &lt;name&gt; [--group g]</code></td><td>Create/use the worktree, allocate ports, provision resources, start services.</td></tr>
+            <tr><td><code>binky down &lt;name&gt;</code></td><td>Stop the processes. Keeps files, ports and data.</td></tr>
+            <tr><td><code>binky remove &lt;name&gt; [--force]</code></td><td>Destroy it — stop, drop its slices, remove its files.</td></tr>
+            <tr><td><code>binky status [.]</code></td><td>List worktrees, grouped by project. <code>.</code> = this project only.</td></tr>
+            <tr><td><code>binky env &lt;name&gt; [--dotenv]</code></td><td>Print a worktree's exposed coordinates.</td></tr>
+            <tr><td><code>binky verify &lt;name&gt;</code></td><td>Run the project's checks. Non-zero on failure.</td></tr>
+            <tr><td><code>binky logs &lt;name&gt;</code></td><td>Print the worktree's captured service logs.</td></tr>
+            <tr><td><code>binky dashboard</code></td><td>Live TUI over every worktree.</td></tr>
+            <tr><td><code>binky doctor</code></td><td>Diagnose the install and daemon. Non-zero when something is wrong.</td></tr>
+            <tr><td><code>binky metrics</code></td><td>Point-in-time daemon metrics as JSON.</td></tr>
+            <tr><td><code>binky mcp</code></td><td>Run the MCP server.</td></tr>
+            <tr><td><code>binky daemon start|stop|status</code></td><td>Manage the background daemon.</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p>
+          State lives in <code>~/.binky/</code> — a SQLite registry migrated in place across
+          upgrades, a JSON-lines event log, per-worktree logs, and the golden template markers.
+          Nothing runs in the cloud and Binky never phones home.
+        </p>
+      </section>
+
+      <!-- ----------------------------------------------------------- adapters -->
+      <section>
+        <h2 id="adapters">Adapters</h2>
+        <p>
+          <strong>16 names, 10 implementations</strong>, every one exercised against a real server
+          in CI. Protocol-compatible names share one implementation rather than a copy of it:
+          <code>valkey</code> is the Redis adapter, <code>percona</code> is the MySQL one,
+          <code>opensearch</code> is the Elasticsearch one.
+        </p>
+        <div class="tw">
+        <table>
+          <thead><tr><th>The slice</th><th>Adapters</th></tr></thead>
+          <tbody>
+            <tr><td>a database</td><td><code>postgres</code> <code>mysql</code> <code>mariadb</code> <code>percona</code> <code>mongodb</code> <code>clickhouse</code></td></tr>
+            <tr><td>a key prefix</td><td><code>redis</code> <code>valkey</code></td></tr>
+            <tr><td>a bucket / prefix</td><td><code>s3</code> <code>minio</code></td></tr>
+            <tr><td>a vhost / topic prefix</td><td><code>rabbitmq</code> <code>kafka</code> <code>redpanda</code></td></tr>
+            <tr><td>a collection</td><td><code>qdrant</code></td></tr>
+            <tr><td>an index prefix</td><td><code>elasticsearch</code> <code>opensearch</code></td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <h3>Writing your own</h3>
+        <p>Two tiers, one contract. Both implement the same four verbs:</p>
+        <div class="tw">
+        <table>
+          <thead><tr><th>Verb</th><th>Does</th></tr></thead>
+          <tbody>
+            <tr><td><code>provision(slice)</code></td><td>Create the slice — <code>CREATE DATABASE …</code></td></tr>
+            <tr><td><code>resolve(slice)</code></td><td>Return its address → <code>${db.url}</code></td></tr>
+            <tr><td><code>teardown(slice)</code></td><td>Destroy it.</td></tr>
+            <tr><td><code>capabilities()</code></td><td>What it supports, e.g. <code>{"clone": true}</code></td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p>
+          <strong>In-process</strong> adapters are Python classes in the repo, discovered by name.
+          <strong>External</strong> adapters are executables in any language, discovered as
+          <code>binky-adapter-&lt;name&gt;</code> on <code>PATH</code> and driven over a one-shot
+          subprocess + JSON protocol:
+        </p>
+<pre><code><span class="tok-cmd">$ binky-adapter-filestore provision</span> <span class="tok-flag">&lt;&lt;&lt;</span> <span class="tok-str">'{"slice": "acme_login-fix", "config": {}}'</span>
+<span class="tok-out">{"ok": true}</span>
+
+<span class="tok-cmd">$ binky-adapter-filestore resolve</span>   <span class="tok-flag">&lt;&lt;&lt;</span> <span class="tok-str">'{"slice": "acme_login-fix", "config": {}}'</span>
+<span class="tok-out">{"ok": true, "address": "file:///tmp/binky-filestore/acme_login-fix"}</span>
+</code></pre>
+        <p>
+          Python authors get the protocol for free: <code>binky.adapter_sdk.run()</code> bridges a
+          normal adapter class to it. There is a complete, dependency-free example in
+          <a href="https://github.com/andreisilva1/binky/blob/main/examples/adapters/filestore.py" rel="noopener">examples/adapters/filestore.py</a>
+          — about thirty lines.
+        </p>
+        <p>
+          <code>clickhouse</code> and the search adapters report <code>clone: false</code> on
+          purpose. There's no server-side copy for them, so "cloning" would mean
+          <code>INSERT … SELECT</code> per table — O(rows), which is exactly the cost
+          <code>clone_from</code> exists to avoid.
+        </p>
+      </section>
+
+      <!-- ---------------------------------------------------------------- mcp -->
+      <section>
+        <h2 id="mcp">MCP server</h2>
+        <p>
+          <code>binky mcp</code> speaks the Model Context Protocol over stdio, exposing five
+          tools: <code>up</code>, <code>down</code>, <code>status</code>, <code>env</code> and
+          <code>verify</code>. They are the same verbs the CLI calls, against the same daemon — an
+          agent that can call tools doesn't need to shell out or parse output.
+        </p>
+        <p>
+          It installs like any other stdio MCP server — a command and its arguments, identical in
+          every client that speaks the protocol. Only where the block lives changes:
+        </p>
+<pre><code>{
+  <span class="tok-key">"mcpServers"</span>: {
+    <span class="tok-key">"binky"</span>: { <span class="tok-key">"command"</span>: <span class="tok-str">"binky"</span>, <span class="tok-key">"args"</span>: [<span class="tok-str">"mcp"</span>] }
+  }
+}
+</code></pre>
+        <p>
+          To run it with nothing installed at all, hand the job to <code>uvx</code> instead —
+          <code>"command": "uvx"</code>, <code>"args": ["--from", "binky[all-adapters]", "binky",
+          "mcp"]</code>. Clients with a CLI usually take the same thing inline, e.g.
+          <code>claude mcp add binky -- binky mcp</code>.
+        </p>
+        <div class="callout">
+          <span class="k">One daemon, either way</span>
+          <p>
+            However you launch it, the MCP server is a thin client of the same machine-global
+            daemon your CLI talks to. A worktree an agent brings up over MCP is the same worktree
+            <code>binky status</code> shows you in a terminal.
+          </p>
+        </div>
+        <p>
+          The useful loop is small: the orchestrator calls <code>up</code> for a branch, hands the
+          agent what <code>env</code> returns, lets it work, and calls <code>verify</code> before
+          accepting the result.
+        </p>
+      </section>
+
+      <!-- --------------------------------------------------------------- cost -->
+      <section>
+        <h2 id="cost">What N worlds cost</h2>
+        <p>
+          The claim is that N isolated worlds shouldn't cost N times one world. Measured, not
+          asserted — <code>benchmarks/worlds.py</code> is in the repo and reproduces this
+          (<code>postgres:16</code>, 200,000 rows per world, Docker Desktop on Windows 11):
+        </p>
+        <div class="tw">
+        <table>
+          <thead><tr>
+            <th class="num">worlds</th>
+            <th class="num">RAM: a container each</th><th class="num">RAM: Binky</th>
+            <th class="num">time: a container each</th><th class="num">time: Binky</th>
+          </tr></thead>
+          <tbody>
+            <tr><td class="num">1</td><td class="num">150 MiB</td><td class="num">174 MiB</td><td class="num">6s</td><td class="num">4s</td></tr>
+            <tr><td class="num">2</td><td class="num">298 MiB</td><td class="num">182 MiB</td><td class="num">11s</td><td class="num">6s</td></tr>
+            <tr><td class="num">4</td><td class="num">596 MiB</td><td class="num">228 MiB</td><td class="num">20s</td><td class="num">10s</td></tr>
+            <tr><td class="num">8</td><td class="num">1197 MiB</td><td class="num">295 MiB</td><td class="num">40s</td><td class="num">16s</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <p>
+          <strong>The 8th world costs +150 MiB and +4.8s as its own container, or +17 MiB and
+          +1.7s under Binky.</strong> One arm grows with N; the other mostly doesn't.
+        </p>
+        <p>
+          Read the first row too. At <strong>one</strong> world Binky is <em>behind</em> — it pays
+          for a server plus a golden template nobody is using yet, and only earns that back on the
+          second. And <strong>disk is not a win</strong>:
+          <code>CREATE DATABASE … TEMPLATE</code> is a file copy, not copy-on-write, so every world
+          is still a full copy of the rows. What Binky removes is the <em>server</em> per world,
+          not the <em>bytes</em> per world. It also doesn't make your own app processes cheaper —
+          one dev server per worktree costs the same either way.
+        </p>
+<pre><code><span class="tok-cmd">python</span> benchmarks/worlds.py <span class="tok-flag">--sweep</span> 1,2,4,8 <span class="tok-flag">--rows</span> 200000
+</code></pre>
+      </section>
+
+      <!-- ----------------------------------------------------------- security -->
+      <section>
+        <h2 id="security">Security</h2>
+        <p>
+          Binky runs <strong>your</strong> commands on <strong>your</strong> machine as
+          <strong>you</strong>. It is a developer tool for a single-user workstation, not a
+          multi-tenant sandbox. A <code>binky.toml</code> is as trusted as a <code>Makefile</code>,
+          and <code>binky up</code> on a repo you don't trust is <code>make</code> on a repo you
+          don't trust.
+        </p>
+        <p>
+          That's a deliberate scope, not an oversight. The threat model and what is explicitly out
+          of it are written down in
+          <a href="https://github.com/andreisilva1/binky/blob/main/SECURITY.md" rel="noopener">SECURITY.md</a>.
+        </p>
+        <p>
+          The one rule worth repeating: never put a credential inline in a committed
+          <code>binky.toml</code>. Use <code>${env.NAME}</code> or an <code>env_file</code>.
+        </p>
+      </section>
+
+      <!-- ---------------------------------------------------- troubleshooting -->
+      <section>
+        <h2 id="troubleshooting">Troubleshooting</h2>
+        <p>Start here. It exits non-zero when something is actually wrong:</p>
+<pre><code><span class="tok-cmd">binky doctor</span>
+</code></pre>
+
+        <h3><code>binky up</code> fails on the adapter</h3>
+        <p>
+          Binky doesn't run your Postgres — it carves a slice of one you already run.
+          <code>admin_url</code> has to point at a server that's up, with an account that can create
+          and drop databases. Check it directly first:
+        </p>
+<pre><code><span class="tok-cmd">psql</span> <span class="tok-str">"$PG_ADMIN_URL"</span> <span class="tok-flag">-c</span> <span class="tok-str">"SELECT 1"</span>
+</code></pre>
+        <p>
+          If that works and Binky still can't connect, the usual cause is
+          <code>${env.NAME}</code> resolving to nothing: Binky reads it from the environment of the
+          <strong>daemon</strong>, not your shell. Export it, then restart the daemon —
+          <code>binky daemon stop &amp;&amp; binky daemon start</code>.
+        </p>
+
+        <h3>Something outside Binky holds the port</h3>
+        <p>
+          Binky allocates from its own range and never guesses, but it can't stop another program
+          from sitting on a port first. Move the range: <code>port_range = [42000, 43000]</code>
+          under <code>[project]</code>.
+        </p>
+
+        <h3><code>web.login-fix.acme.localhost</code> doesn't resolve</h3>
+        <p>
+          <code>*.localhost</code> resolves to loopback on macOS, most Linux setups and Windows 10+.
+          If yours doesn't, add the specific name to your hosts file — or skip the proxy entirely
+          and hit the port directly: <code>binky status</code> lists every service's port, and
+          <code>binky env</code> prints the addresses.
+        </p>
+
+        <h3>It cloned, but my schema is stale</h3>
+        <p>
+          The golden template hash covers the migrate and seed <em>commands</em>, not the files they
+          run. Delete the marker to force a rebuild:
+        </p>
+<pre><code><span class="tok-cmt"># ~/.binky/golden/&lt;adapter&gt;/&lt;project&gt;_golden_&lt;clone_from&gt;</span>
+<span class="tok-cmd">rm -f</span> ~/.binky/golden/postgres/acme_golden_golden
+</code></pre>
+
+        <h3>It silently stopped cloning</h3>
+        <p>It didn't do it silently — look for <code>clone_fallback</code> in the event log:</p>
+<pre><code><span class="tok-cmd">grep</span> clone_fallback ~/.binky/events.log
+</code></pre>
+        <p>
+          The world you get is identical, just built the slow way. The most common cause by far is a
+          <code>mysqldump</code> older than the MySQL server it's dumping
+          (<code>caching_sha2_password could not be loaded</code>) — upgrade the client, or accept
+          the slow path.
+        </p>
+
+        <h3>Most of what <code>binky init</code> wrote is commented out</h3>
+        <p>
+          Expected, and it's the honest answer. Compose says how to run something <em>in a
+          container</em>; Binky runs it <em>on the host</em>, and those are rarely the same command.
+          Rather than guessing a <code>cmd</code> that looks right and doesn't work, <code>init</code>
+          writes the block commented with a TODO.
+        </p>
+
+        <h3>Still stuck</h3>
+        <p>
+          <code>binky doctor</code> output plus the relevant part of
+          <code>~/.binky/events.log</code> is what makes an issue actionable. Binky logs event
+          names, worktrees, services and adapter names — not your config values. One thing to skim
+          before pasting: failure events carry the underlying error text, and an error raised by a
+          database driver can quote the connection it was attempting.
+        </p>
+        <p>
+          The long-form version of all of this, kept next to the code, is
+          <a href="https://github.com/andreisilva1/binky/blob/main/TROUBLESHOOTING.md" rel="noopener">TROUBLESHOOTING.md</a>.
+        </p>
+        <p style="margin-top:32px">
+          <a class="btn" href="https://github.com/andreisilva1/binky/issues" rel="noopener">
+            Open an issue <span class="arrow">→</span>
+          </a>
+        </p>
+      </section>
+
+    </div>
+  </div>
+</main>
+
+<footer>
+  <div class="container foot-inner">
+    <a class="foot-brand" href="./index.html">
+      <svg class="rabbit" aria-hidden="true"><use href="#rabbit" /></svg>
+      <span>binky — MIT licensed</span>
+    </a>
+    <nav class="foot-links">
+      <a href="./docs.html">Docs</a>
+      <a href="https://github.com/andreisilva1/binky" rel="noopener">GitHub</a>
+      <a href="https://github.com/andreisilva1/binky/blob/main/CHANGELOG.md" rel="noopener">Changelog</a>
+    </nav>
+  </div>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
