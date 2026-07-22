@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Binky">
+  <title>Binky</title>
+  <!--
+    The flat iconic rabbit: two ears with cut-out insides, a head with cut-out
+    eyes and nose. One evenodd group, so every counter is a hole in the shape
+    rather than a lighter shape painted on top — which is what lets this same
+    file work as a CSS mask, where only the alpha channel survives.
+
+    The fill is the coral accent because this file is also the favicon and the
+    README mark, and it has to hold up on GitHub's light and dark themes alike;
+    the deep indigo would disappear against the dark one. In the pages the fill
+    is masked away and replaced by currentColor, so the nav, hero and footer
+    keep tinting it independently.
+  -->
+  <g fill="#f2683c" fill-rule="evenodd">
+    <!-- left ear -->
+    <g transform="translate(18 3) rotate(-10 6 32)">
+      <path d="M6,0 a6,6 0 0,1 6,6 L12,26 a6,6 0 0,1 -12,0 L0,6 a6,6 0 0,1 6,-6 Z
+               M6,6.5 a2.5,2.5 0 0,1 2.5,2.5 L8.5,23.5 a2.5,2.5 0 0,1 -5,0 L3.5,9 a2.5,2.5 0 0,1 2.5,-2.5 Z" />
+    </g>
+    <!-- right ear -->
+    <g transform="translate(34 3) rotate(10 6 32)">
+      <path d="M6,0 a6,6 0 0,1 6,6 L12,26 a6,6 0 0,1 -12,0 L0,6 a6,6 0 0,1 6,-6 Z
+               M6,6.5 a2.5,2.5 0 0,1 2.5,2.5 L8.5,23.5 a2.5,2.5 0 0,1 -5,0 L3.5,9 a2.5,2.5 0 0,1 2.5,-2.5 Z" />
+    </g>
+    <!-- head + cut-out eyes + nose -->
+    <path d="M15,41 a17,17 0 1,0 34,0 a17,17 0 1,0 -34,0 Z
+             M22.4,41 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z
+             M36.4,41 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z
+             M32,50.5 L28.6,46.2 L35.4,46.2 Z" />
+  </g>
+</svg>

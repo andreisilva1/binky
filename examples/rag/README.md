@@ -78,8 +78,10 @@ delete the marker under `~/.binky/golden/` to force one.
 
 - **Cloning copies bytes.** `CREATE DATABASE ... TEMPLATE` is a file copy, not
   copy-on-write. Ten worktrees hold ten copies of the corpus. It buys you *time*,
-  not disk. If disk is what hurts, a branching Postgres (Neon) is the answer, and
-  Binky has an adapter for that too.
+  not disk. If disk is what hurts, the answer is a Postgres that branches
+  copy-on-write, like Neon — and Binky does not ship an adapter for one. Pointed
+  at such a server, the `postgres` adapter still does only what it claims: it
+  creates databases, it does not branch them.
 - **The extension must exist on the server.** Binky provisions databases; it
   does not install Postgres extensions it wasn't given. `CREATE EXTENSION` in
   `migrate.py` fails on a stock `postgres:16` image with a clear error.

@@ -52,6 +52,23 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* ---------- nav ---------- */
+/* ---------- the mark ---------- */
+/* One file, binky.svg, pulled in as a mask rather than an <img>. The mark shows
+   up in four different colours across these pages — ink in the nav, coral in the
+   hero, muted in the footer, faint on the empty docs state — so `color` has to
+   keep driving it. A mask throws away the file's own paint and keeps only its
+   alpha, which is exactly that: the geometry lives in one place, the colour
+   stays with whoever is using it. The coral baked into the file is for the two
+   places that consume it directly, the favicon and the README. */
+.rabbit,
+.rabbit-lg {
+  display: inline-block;
+  flex: none;
+  background-color: currentColor;
+  -webkit-mask: url(binky.svg) center / contain no-repeat;
+  mask: url(binky.svg) center / contain no-repeat;
+}
+
 .nav {
   position: sticky;
   top: 0;

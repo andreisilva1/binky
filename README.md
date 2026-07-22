@@ -1,4 +1,6 @@
-# 🐇 Binky
+<img src="site/binky.svg" alt="" width="76" />
+
+# Binky
 
 **Give every git worktree its own isolated local world — ports, env, database, URLs — so a swarm of coding agents runs in parallel on one machine without anything colliding.**
 

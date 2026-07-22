@@ -7,37 +7,14 @@
 <meta name="description" content="Binky gives every git worktree its own ports, env, database and URLs, so a swarm of coding agents runs in parallel on one machine without collisions." />
 <meta name="color-scheme" content="light" />
 <link rel="stylesheet" href="styles.css" />
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><text y='52' font-size='52'>🐇</text></svg>" />
+<link rel="icon" href="binky.svg" type="image/svg+xml" />
 </head>
 <body>
-
-<!-- flat iconic rabbit, defined once, reused via <use> -->
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <symbol id="rabbit" viewBox="0 0 64 64">
-    <g fill="currentColor" fill-rule="evenodd">
-      <!-- left ear -->
-      <g transform="translate(18 3) rotate(-10 6 32)">
-        <path d="M6,0 a6,6 0 0,1 6,6 L12,26 a6,6 0 0,1 -12,0 L0,6 a6,6 0 0,1 6,-6 Z
-                 M6,6.5 a2.5,2.5 0 0,1 2.5,2.5 L8.5,23.5 a2.5,2.5 0 0,1 -5,0 L3.5,9 a2.5,2.5 0 0,1 2.5,-2.5 Z" />
-      </g>
-      <!-- right ear -->
-      <g transform="translate(34 3) rotate(10 6 32)">
-        <path d="M6,0 a6,6 0 0,1 6,6 L12,26 a6,6 0 0,1 -12,0 L0,6 a6,6 0 0,1 6,-6 Z
-                 M6,6.5 a2.5,2.5 0 0,1 2.5,2.5 L8.5,23.5 a2.5,2.5 0 0,1 -5,0 L3.5,9 a2.5,2.5 0 0,1 2.5,-2.5 Z" />
-      </g>
-      <!-- head + cut-out eyes + nose -->
-      <path d="M15,41 a17,17 0 1,0 34,0 a17,17 0 1,0 -34,0 Z
-               M22.4,41 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z
-               M36.4,41 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z
-               M32,50.5 L28.6,46.2 L35.4,46.2 Z" />
-    </g>
-  </symbol>
-</svg>
 
 <header class="nav" id="nav">
   <div class="container nav-inner">
     <a class="brand" href="./index.html">
-      <svg class="rabbit" aria-hidden="true"><use href="#rabbit" /></svg>
+      <span class="rabbit" aria-hidden="true"></span>
       <span class="wordmark">binky</span>
     </a>
     <nav class="nav-links">
@@ -62,7 +39,7 @@
     <div class="hero-grid" aria-hidden="true"></div>
 
     <div class="container hero-inner">
-      <svg class="rabbit-lg rise d1" aria-hidden="true"><use href="#rabbit" /></svg>
+      <span class="rabbit-lg rise d1" aria-hidden="true"></span>
 
       <div class="eyebrow rise d2">MIT · Python 3.11+ · macOS · Linux · Windows</div>
 
@@ -286,7 +263,7 @@
 <footer>
   <div class="container foot-inner">
     <a class="foot-brand" href="#top">
-      <svg class="rabbit" aria-hidden="true"><use href="#rabbit" /></svg>
+      <span class="rabbit" aria-hidden="true"></span>
       <span>binky <span class="gloss">(n.) the mid-air twist a rabbit does when it has room to run</span> — MIT licensed</span>
     </a>
     <nav class="foot-links">
