@@ -21,6 +21,7 @@ import sys
 import time
 
 from warren import admission, ipc, ops, paths, proxy, rpc
+from warren.https import Caddy
 from warren.registry import Registry, WorktreeStatus
 from warren.supervisor import ProcessManager, TickReport
 
@@ -39,6 +40,8 @@ class Daemon:
         self.routes: dict[str, int] = {}
         self._routes_by_wt: dict[tuple[str, str], dict[str, int]] = {}
         self.proxy = proxy.Proxy(lambda host: self.routes.get(host))
+        self._proxy_port = 0
+        self._caddy: Caddy | None = None
         ops.reconcile(self.registry)  # clean up whatever a previous daemon left behind
         self.router = rpc.Router()
         self.router.add("ping", self._ping)
@@ -73,10 +76,12 @@ class Daemon:
 
     async def _up(self, params: dict) -> dict:
         async with self._wt_lock(params.get("root"), params.get("worktree")):
-            with contextlib.suppress(Exception):  # apply the project's max_parallel override
+            with contextlib.suppress(Exception):  # apply the project's max_parallel / https prefs
                 cfg = ops._load(params.get("root"))
                 if cfg.project.max_parallel:
                     self.admission.set_max_parallel(cfg.project.max_parallel)
+                if cfg.project.https:
+                    self._ensure_https()
             token = await self.admission.acquire()  # FIFO — waits for capacity
             try:
                 # off the event loop: wait_healthy / migrate must not block other requests
@@ -107,6 +112,14 @@ class Daemon:
             self.admission.release(token)
         self._routes_by_wt.pop((project, worktree), None)
         self._rebuild_routes()
+
+    def _ensure_https(self) -> None:
+        """Lazily front the running proxy with Caddy for TLS (once, if Caddy is present)."""
+        if self._caddy is not None or self._proxy_port <= 0:
+            return
+        caddy = Caddy(self._proxy_port, https_port=int(os.environ.get("WARREN_HTTPS_PORT", "443")))
+        if caddy.available and caddy.start():
+            self._caddy = caddy
 
     def _rebuild_routes(self) -> None:
         self.routes = {
@@ -190,6 +203,7 @@ class Daemon:
         if proxy_port > 0:
             with contextlib.suppress(OSError):
                 await self.proxy.start(proxy_port)
+                self._proxy_port = proxy_port
         pump_task = asyncio.create_task(self._pump_loop())
         supervise_task = asyncio.create_task(self._supervise_loop())
         ipc.write_daemon_info(info)
@@ -199,6 +213,8 @@ class Daemon:
         finally:
             with contextlib.suppress(Exception):
                 await self.proxy.stop()
+            if self._caddy is not None:
+                self._caddy.stop()
             for task in (pump_task, supervise_task):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):

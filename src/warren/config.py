@@ -77,6 +77,7 @@ class Project(_Base):
     domain: str | None = None  # None → derived as "<name>.localhost" at runtime
     port_range: tuple[int, int] | None = None
     max_parallel: int | None = None  # None → derived from machine RAM
+    https: bool = False  # front the proxy with Caddy (TLS via a local CA) when available
 
     @model_validator(mode="after")
     def _valid_range(self) -> Project:
