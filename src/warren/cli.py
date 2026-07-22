@@ -216,6 +216,18 @@ def dashboard() -> None:
 
 
 @app.command()
+def mcp() -> None:
+    """Run the Warren MCP server (stdio) so AI agents can call Warren's verbs as tools."""
+    try:
+        from warren.mcp import serve
+
+        serve()
+    except RuntimeError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@app.command()
 def logs(worktree: Annotated[str, typer.Argument(help="Worktree to show logs for.")]) -> None:
     """Print a worktree's captured service logs."""
     try:

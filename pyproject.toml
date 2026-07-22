@@ -37,6 +37,9 @@ dev = [
 postgres = [
   "psycopg[binary]>=3",
 ]
+mcp = [
+  "mcp>=1.0",
+]
 
 [project.scripts]
 warren = "warren.cli:app"
