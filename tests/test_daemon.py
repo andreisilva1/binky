@@ -1,10 +1,14 @@
 """Integration tests for the daemon lifecycle (spawns a real detached process)."""
 
 import contextlib
+import os
+import stat
 
 import pytest
 
 from binky import daemon, ipc, paths
+
+unix_only = pytest.mark.skipif(os.name == "nt", reason="Windows uses a loopback TCP port")
 
 
 @pytest.fixture(autouse=True)
@@ -70,6 +74,63 @@ def test_start_is_idempotent() -> None:
     daemon.start(timeout=20)  # already running → no-op
     second = ipc.read_daemon_info()
     assert first.pid == second.pid
+
+
+@unix_only
+def test_a_deep_home_still_gets_a_socket_that_fits(tmp_path, monkeypatch) -> None:
+    """`sun_path` is 104 bytes on macOS, and a macOS $TMPDIR spends half of that
+    before Binky appends anything — so a deep BINKY_HOME used to kill the daemon
+    at bind() with a bare "AF_UNIX path too long"."""
+    deep = tmp_path / ("d" * 40) / ("e" * 40) / ("f" * 40)
+    monkeypatch.setenv("BINKY_HOME", str(deep))
+
+    sock = paths.socket_path()
+    assert len(str(sock).encode()) <= 100, sock
+    assert not str(sock).startswith(str(deep))  # fell back, rather than truncating
+
+    info = sock.parent.lstat()
+    assert stat.S_ISDIR(info.st_mode)
+    assert info.st_uid == os.getuid()
+    assert stat.S_IMODE(info.st_mode) == 0o700  # /tmp is shared; this dir is not
+
+
+@unix_only
+def test_a_deep_home_is_keyed_to_its_own_socket(tmp_path, monkeypatch) -> None:
+    """Two homes must not land on the same socket just because both were long."""
+    long_tail = "g" * 60
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "one" / long_tail))
+    first = paths.socket_path()
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "two" / long_tail))
+    assert paths.socket_path() != first
+
+
+@unix_only
+def test_the_daemon_comes_up_under_a_deep_home(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / ("h" * 40) / ("i" * 40) / ("j" * 40)))
+    daemon.start(timeout=20)
+    assert ipc.call("ping")["pong"] is True
+    assert daemon.stop(timeout=10) is True
+
+
+def test_clear_daemon_info_spares_another_daemons_endpoint() -> None:
+    """A daemon can take seconds to finish dying — long enough for a replacement to
+    have written its own endpoint. Deleting that one leaves a daemon nobody can find."""
+    mine = ipc.DaemonInfo(transport="tcp", token="t", pid=os.getpid(), host="127.0.0.1", port=1)
+    theirs = ipc.DaemonInfo(
+        transport="tcp", token="t", pid=os.getpid() + 1, host="127.0.0.1", port=2
+    )
+
+    ipc.write_daemon_info(theirs)
+    ipc.clear_daemon_info()
+    assert ipc.read_daemon_info() == theirs  # not ours to delete
+
+    ipc.write_daemon_info(mine)
+    ipc.clear_daemon_info()
+    assert ipc.read_daemon_info() is None
+
+    paths.daemon_info_path().write_text("{not json", encoding="utf-8")
+    ipc.clear_daemon_info()
+    assert not paths.daemon_info_path().exists()  # unreadable is a leftover either way
 
 
 def test_bad_token_rejected() -> None:

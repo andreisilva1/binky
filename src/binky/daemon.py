@@ -207,8 +207,10 @@ class Daemon:
             writer.close()
 
     async def serve(self) -> None:
-        if ipc.USE_UNIX:
-            sock_path = paths.socket_path()
+        # Resolved once and reused on the way out: socket_path() can fall back to a
+        # directory it creates, which is not something to redo inside a `finally`.
+        sock_path = paths.socket_path() if ipc.USE_UNIX else None
+        if sock_path is not None:
             sock_path.parent.mkdir(parents=True, exist_ok=True)
             _unlink(sock_path)
             server = await asyncio.start_unix_server(self._handle, path=str(sock_path))
@@ -240,6 +242,15 @@ class Daemon:
             async with server:
                 await self._stop.wait()
         finally:
+            # Retract the endpoint first. The listening socket closed when the
+            # `async with` exited, so from here on daemon.json advertises an address
+            # that refuses connections — and the teardown below is the slow part
+            # (stop_all waits up to five seconds per worktree). Clearing it last
+            # left a window where the daemon was unreachable but still looked like
+            # it was there, which is exactly what a caller polling for shutdown sees.
+            ipc.clear_daemon_info()
+            if sock_path is not None:
+                _unlink(sock_path)
             with contextlib.suppress(Exception):
                 await self.proxy.stop()
             if self._caddy is not None:
@@ -250,9 +261,6 @@ class Daemon:
                     await task
             self.procman.stop_all()
             self.registry.close()
-            ipc.clear_daemon_info()
-            if ipc.USE_UNIX:
-                _unlink(paths.socket_path())
 
 
 def _unlink(path) -> None:
@@ -336,7 +344,10 @@ def stop(timeout: float = 5.0) -> bool:
         ipc.call("shutdown", timeout=2.0)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if not is_running():
+        # Both conditions. The daemon stops answering the moment it closes its
+        # listening socket, which is before it has retracted its endpoint file;
+        # returning on the ping alone hands the caller a daemon.json still on disk.
+        if not is_running() and ipc.read_daemon_info() is None:
             return True
         time.sleep(0.05)
     return True

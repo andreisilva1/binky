@@ -62,6 +62,17 @@ def read_daemon_info() -> DaemonInfo | None:
 
 
 def clear_daemon_info() -> None:
+    """Remove the endpoint file — but only if it is still ours.
+
+    Shutting down can take seconds, which is long enough for a replacement daemon
+    to have started and written its own endpoint. Deleting that one would leave a
+    daemon running that nothing can find, and the symptom (``binky`` says the
+    daemon is not running, ``ps`` says it is) points nowhere near here. A file we
+    cannot read is a leftover either way, so it goes.
+    """
+    info = read_daemon_info()
+    if info is not None and info.pid != os.getpid():
+        return
     paths.daemon_info_path().unlink(missing_ok=True)
 
 
