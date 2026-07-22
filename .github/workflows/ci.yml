@@ -21,7 +21,7 @@ jobs:
       - name: Install
         run: python -m pip install -e ".[dev]"
       - name: Lint
-        run: python -m ruff check src tests examples
+        run: python -m ruff check src tests examples benchmarks
       - name: Test
         run: python -m pytest -q
 
