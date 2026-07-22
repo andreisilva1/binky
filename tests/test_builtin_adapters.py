@@ -18,6 +18,8 @@ import pytest
 
 from warren import adapters, ops
 from warren.builtin_adapters import (
+    ClickHouseAdapter,
+    ElasticsearchAdapter,
     KafkaAdapter,
     MongoAdapter,
     MySQLAdapter,
@@ -36,10 +38,24 @@ from warren.config import load_config_data
 def test_every_shipped_adapter_is_discoverable() -> None:
     names = adapters.available()
     for expected in (
-        "postgres", "redis", "mysql", "mariadb", "mongodb",
+        "postgres", "redis", "valkey", "mysql", "mariadb", "percona", "mongodb",
         "s3", "minio", "rabbitmq", "kafka", "redpanda", "qdrant",
+        "clickhouse", "elasticsearch", "opensearch",
     ):
         assert expected in names
+
+
+@pytest.mark.parametrize(
+    ("alias", "canonical"),
+    [("valkey", "redis"), ("percona", "mysql"), ("mariadb", "mysql"),
+     ("opensearch", "elasticsearch"), ("minio", "s3"), ("redpanda", "kafka")],
+)
+def test_protocol_compatible_aliases_resolve_to_one_implementation(
+    alias: str, canonical: str
+) -> None:
+    """A fork that speaks the same protocol gets the same slice, not a copy of the code."""
+    url = {"admin_url": "http://user:pw@localhost:1234"}
+    assert type(adapters.get(alias, url)) is type(adapters.get(canonical, url))
 
 
 def test_lazy_load_does_not_need_the_driver_installed() -> None:
@@ -120,6 +136,30 @@ def test_mongo_strips_characters_mongo_forbids() -> None:
     assert len(MongoAdapter._ident("a" * 80)) <= 63
 
 
+def test_clickhouse_rejects_an_unsafe_identifier() -> None:
+    assert ClickHouseAdapter._ident("acme_feat") == "acme_feat"
+    with pytest.raises(adapters.AdapterError, match="unsafe"):
+        ClickHouseAdapter._ident('acme"; DROP DATABASE x; --')
+
+
+def test_elasticsearch_prefix_obeys_index_naming_rules() -> None:
+    assert ElasticsearchAdapter._prefix("Acme_Feat") == "acme_feat"  # index names are lowercase
+    assert ElasticsearchAdapter._prefix("_leading") == "leading"  # cannot start with _
+    assert len(ElasticsearchAdapter._prefix("a" * 300)) <= 200
+
+
+def test_one_slice_is_never_a_prefix_of_another_slices_indices() -> None:
+    """`acme_feat` must not own `acme_feat_2`'s indices.
+
+    Prefix isolation lives or dies on this: teardown of one worktree deleting a
+    sibling's data is the worst failure this adapter could have.
+    """
+    adapter = ElasticsearchAdapter({"admin_url": "http://localhost:9200"})
+    short, long = adapter._prefix("acme_feat"), adapter._prefix("acme_feat_2")
+    assert not (long == short or long.startswith(short + adapter.SEP))
+    assert f"{long}-products".startswith(long + adapter.SEP)  # but it does own its own
+
+
 # --------------------------------------------------------------------------- #
 #  address construction
 # --------------------------------------------------------------------------- #
@@ -147,6 +187,26 @@ def test_kafka_accepts_a_bare_bootstrap_pair() -> None:
 def test_qdrant_address_carries_the_collection_prefix() -> None:
     adapter = QdrantAdapter({"admin_url": "http://localhost:6333/"})
     assert adapter.resolve("acme_feat") == "http://localhost:6333/acme_feat"
+
+
+def test_clickhouse_address_is_the_http_endpoint_with_the_database() -> None:
+    adapter = ClickHouseAdapter({"admin_url": "http://default:@localhost:8123"})
+    assert adapter.resolve("acme_feat") == "http://default:@localhost:8123/acme_feat"
+
+
+def test_elasticsearch_address_carries_the_index_prefix() -> None:
+    adapter = ElasticsearchAdapter({"admin_url": "http://localhost:9200/"})
+    assert adapter.resolve("acme_feat") == "http://localhost:9200/acme_feat"
+
+
+def test_clickhouse_credentials_travel_as_a_header_not_in_the_url() -> None:
+    """Userinfo in a request line leaks into logs and proxy access lines."""
+    from warren.builtin_adapters import _split_auth
+
+    root, headers = _split_auth("http://default:s3cret@localhost:8123")
+    assert root == "http://localhost:8123"
+    assert headers["authorization"].startswith("Basic ")
+    assert "s3cret" not in root
 
 
 def test_redis_resolve_before_provision_is_a_clear_error(monkeypatch) -> None:
@@ -312,3 +372,65 @@ def test_kafka_roundtrip() -> None:
 def test_qdrant_roundtrip() -> None:
     adapter = adapters.get("qdrant", {"admin_url": os.environ["WARREN_TEST_QDRANT"]})
     _roundtrip(adapter, SLICE, clone=False)
+
+
+@pytest.mark.skipif(
+    not os.environ.get("WARREN_TEST_CLICKHOUSE"), reason="set WARREN_TEST_CLICKHOUSE"
+)
+def test_clickhouse_roundtrip() -> None:
+    adapter = adapters.get("clickhouse", {"admin_url": os.environ["WARREN_TEST_CLICKHOUSE"]})
+    _roundtrip(adapter, SLICE, clone=False)
+
+
+@pytest.mark.skipif(
+    not os.environ.get("WARREN_TEST_CLICKHOUSE"), reason="set WARREN_TEST_CLICKHOUSE"
+)
+def test_clickhouse_database_really_appears_and_disappears() -> None:
+    """The round-trip proves the calls succeed; this proves they did something."""
+    adapter = adapters.get("clickhouse", {"admin_url": os.environ["WARREN_TEST_CLICKHOUSE"]})
+    exists = f"SELECT count() FROM system.databases WHERE name = '{SLICE}'"
+    try:
+        adapter.provision(SLICE)
+        assert adapter._query(exists).strip() == "1"
+        # A table written into the slice must survive inside it.
+        adapter._query(f"CREATE TABLE {SLICE}.t (x UInt8) ENGINE = MergeTree ORDER BY x")
+        adapter._query(f"INSERT INTO {SLICE}.t VALUES (7)")
+        assert adapter._query(f"SELECT x FROM {SLICE}.t").strip() == "7"
+    finally:
+        adapter.teardown(SLICE)
+    assert adapter._query(exists).strip() == "0"
+
+
+@pytest.mark.skipif(
+    not os.environ.get("WARREN_TEST_ELASTICSEARCH"), reason="set WARREN_TEST_ELASTICSEARCH"
+)
+def test_elasticsearch_roundtrip() -> None:
+    adapter = adapters.get(
+        "elasticsearch",
+        {"admin_url": os.environ["WARREN_TEST_ELASTICSEARCH"], "indices": "products,orders"},
+    )
+    _roundtrip(adapter, SLICE, clone=False)
+
+
+@pytest.mark.skipif(
+    not os.environ.get("WARREN_TEST_ELASTICSEARCH"), reason="set WARREN_TEST_ELASTICSEARCH"
+)
+def test_elasticsearch_teardown_spares_a_sibling_slice() -> None:
+    """Live proof of the prefix-overlap guarantee the unit test asserts on names.
+
+    `warren_test_slice_zzz` tearing down must not touch `warren_test_slice_zzz_2`.
+    """
+    url = os.environ["WARREN_TEST_ELASTICSEARCH"]
+    config = {"admin_url": url, "indices": "products"}
+    adapter = adapters.get("elasticsearch", config)
+    sibling = SLICE + "_2"
+    try:
+        adapter.provision(SLICE)
+        adapter.provision(sibling)
+        assert adapter._owned(SLICE) == [f"{SLICE}-products"]
+        adapter.teardown(SLICE)
+        assert adapter._owned(SLICE) == []
+        assert adapter._owned(sibling) == [f"{sibling}-products"]  # untouched
+    finally:
+        adapter.teardown(SLICE)
+        adapter.teardown(sibling)

@@ -25,8 +25,11 @@ jobs:
       - name: Test
         run: python -m pytest -q
 
-  adapters:
-    name: adapter integration (real servers)
+  # Ten backends in one job made a single container failure look like a suite failure
+  # and serialised the wait. Split by weight: the datastores most projects actually
+  # run, and everything else. The gated tests skip on whatever a job doesn't provide.
+  adapters-core:
+    name: adapter integration (core datastores)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -65,6 +68,66 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # MinIO needs entrypoint arguments the `services:` block cannot express.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+
+      - name: Wait for MinIO
+        run: |
+          for _ in $(seq 1 60); do
+            if timeout 1 bash -c "</dev/tcp/127.0.0.1/9000" 2>/dev/null; then
+              echo "minio is up"; exit 0
+            fi
+            sleep 2
+          done
+          echo "minio never came up"; exit 1
+
+      # MySQL reports `clone` only when a client that can authenticate against the
+      # server is on PATH. Ubuntu's `mysql-client` matches the mysql:8 service, so
+      # this is what keeps the clone path from being quietly skipped in CI.
+      - name: Install the MySQL client (exercises the clone path)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mysql-client
+
+      - name: Install
+        run: python -m pip install -e ".[dev,all-adapters]"
+
+      - name: Test against real servers
+        env:
+          WARREN_TEST_PG: postgres://postgres:postgres@localhost:5432/postgres
+          WARREN_TEST_REDIS: redis://localhost:6379
+          WARREN_TEST_MYSQL: mysql://root:mysql@localhost:3306
+          WARREN_TEST_MONGO: mongodb://localhost:27017
+          WARREN_TEST_S3: http://localhost:9000
+          WARREN_TEST_S3_KEY: minioadmin
+          WARREN_TEST_S3_SECRET: minioadmin
+        run: python -m pytest -q tests/test_adapters.py tests/test_builtin_adapters.py
+
+      - name: Assert the MySQL clone path actually ran
+        run: |
+          python - <<'PY'
+          from warren import adapters
+          caps = adapters.get("mysql", {"admin_url": "mysql://root:mysql@localhost:3306"}).capabilities()
+          assert caps["clone"], f"CI must exercise the mysql clone path, got {caps}"
+          print("mysql clone capability confirmed in CI")
+          PY
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs minio || true
+
+  adapters-extra:
+    name: adapter integration (messaging, search, analytics)
+    runs-on: ubuntu-latest
+    services:
       rabbitmq:
         image: rabbitmq:3-management
         ports: ["5672:5672", "15672:15672"]
@@ -79,14 +142,20 @@ jobs:
         with:
           python-version: "3.12"
 
-      # MinIO, Qdrant and Kafka need entrypoint arguments / a readiness probe the
-      # `services:` block cannot express, so they run as plain containers.
-      - name: Start MinIO, Qdrant and Kafka
+      - name: Start Kafka, Qdrant, ClickHouse and Elasticsearch
         run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
           docker run -d --name qdrant -p 6333:6333 qdrant/qdrant
+          docker run -d --name clickhouse -p 8123:8123 \
+            -e CLICKHOUSE_SKIP_USER_SETUP=1 \
+            clickhouse/clickhouse-server:24
+          # Elasticsearch is the heaviest container here; cap the JVM so it cannot
+          # starve the rest of the job, and drop security (this is a scratch cluster).
+          docker run -d --name elasticsearch -p 9200:9200 \
+            -e discovery.type=single-node \
+            -e xpack.security.enabled=false \
+            -e xpack.security.enrollment.enabled=false \
+            -e "ES_JAVA_OPTS=-Xms512m -Xmx512m" \
+            docker.elastic.co/elasticsearch/elasticsearch:8.15.0
           docker run -d --name kafka -p 9092:9092 \
             -e KAFKA_NODE_ID=1 \
             -e KAFKA_PROCESS_ROLES=broker,controller \
@@ -103,37 +172,33 @@ jobs:
 
       - name: Wait for them
         run: |
-          for port in 9000 6333 9092; do
-            for _ in $(seq 1 60); do
+          for port in 6333 8123 9200 9092; do
+            up=""
+            for _ in $(seq 1 90); do
               if timeout 1 bash -c "</dev/tcp/127.0.0.1/$port" 2>/dev/null; then
-                echo "port $port is up"; break
+                up=yes; echo "port $port is up"; break
               fi
               sleep 2
             done
+            if [ -z "$up" ]; then echo "port $port never came up"; exit 1; fi
           done
-
-      # The MySQL adapter reports `clone` only when these are present, so install
-      # them explicitly — otherwise CI would quietly skip the clone path.
-      - name: Install the MySQL client (exercises the clone path)
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq mysql-client
 
       - name: Install
         run: python -m pip install -e ".[dev,all-adapters]"
 
-      - name: Test every adapter against a real server
+      - name: Test against real servers
         env:
-          WARREN_TEST_PG: postgres://postgres:postgres@localhost:5432/postgres
-          WARREN_TEST_REDIS: redis://localhost:6379
-          WARREN_TEST_MYSQL: mysql://root:mysql@localhost:3306
-          WARREN_TEST_MONGO: mongodb://localhost:27017
-          WARREN_TEST_S3: http://localhost:9000
-          WARREN_TEST_S3_KEY: minioadmin
-          WARREN_TEST_S3_SECRET: minioadmin
           WARREN_TEST_RABBITMQ: http://guest:guest@localhost:15672
           WARREN_TEST_KAFKA: kafka://localhost:9092
           WARREN_TEST_QDRANT: http://localhost:6333
+          WARREN_TEST_CLICKHOUSE: http://default:@localhost:8123
+          WARREN_TEST_ELASTICSEARCH: http://localhost:9200
         run: python -m pytest -q tests/test_adapters.py tests/test_builtin_adapters.py
 
       - name: Container logs on failure
         if: failure()
-        run: docker logs kafka; docker logs minio; docker logs qdrant
+        run: |
+          docker logs kafka || true
+          docker logs clickhouse || true
+          docker logs elasticsearch || true
+          docker logs qdrant || true

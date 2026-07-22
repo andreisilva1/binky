@@ -15,7 +15,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from warren import adapters, allocator, git, health, paths, resolve
+from warren import adapters, allocator, git, health, observability, paths, resolve
 from warren.config import ConfigError, load_config
 from warren.registry import Registry, WorktreeStatus
 from warren.rpc import RpcFault
@@ -122,6 +122,35 @@ def _ensure_golden(adapter, svc, sname: str, wt, project: str) -> str:
     return golden
 
 
+def _try_clone(adapter, svc, sname: str, wt, project: str, sl_name: str) -> bool:
+    """Clone from the golden template; return False if the caller must fall back.
+
+    ``capabilities()`` is a promise about the *adapter*, not about the machine it runs
+    on — a clone can still fail on something environmental (a client binary too old to
+    authenticate, a missing grant, a server setting). Correctness never depends on
+    cloning: provisioning the slice and running migrate+seed per worktree produces the
+    same world, only slower. So a failed clone degrades instead of failing ``up``, and
+    says so in the event log rather than silently.
+    """
+    try:
+        golden = _ensure_golden(adapter, svc, sname, wt, project)
+        adapter.clone(golden, sl_name)
+        return True
+    except adapters.AdapterError as exc:
+        observability.log_event(
+            "clone_fallback",
+            project=project,
+            worktree=wt.name,
+            service=sname,
+            adapter=svc.adapter,
+            error=str(exc),
+        )
+        # A half-copied slice must never be migrated into — start the slow path clean.
+        with contextlib.suppress(Exception):
+            adapter.teardown(sl_name)
+        return False
+
+
 def _provision_adapters(
     reg, cfg, wt, project: str, name: str, ports: dict, services: dict
 ) -> dict[str, str]:
@@ -129,8 +158,9 @@ def _provision_adapters(
 
     With ``clone_from`` (and a clone-capable adapter) the slice is a ~instant copy of
     a golden template that already holds migrate+seed; otherwise it's provisioned and
-    migrated/seeded per worktree. A ``clone_from`` on an adapter that can't clone falls
-    back to the per-worktree path.
+    migrated/seeded per worktree. A ``clone_from`` falls back to that per-worktree path
+    both when the adapter can't clone and when a clone attempt fails (see
+    :func:`_try_clone`).
     """
     addresses = {sl.service: sl.address for sl in reg.slices_for(wt.id) if sl.address}
     sl_name = adapters.slice_name(project, name)
@@ -141,9 +171,8 @@ def _provision_adapters(
             adapter = adapters.get(svc.adapter, _adapter_config(svc, sname, ports, name))
             cloned = bool(svc.clone_from) and bool(adapter.capabilities().get("clone"))
             if cloned:
-                golden = _ensure_golden(adapter, svc, sname, wt, project)
-                adapter.clone(golden, sl_name)
-            else:
+                cloned = _try_clone(adapter, svc, sname, wt, project, sl_name)
+            if not cloned:
                 adapter.provision(sl_name)
             address = adapter.resolve(sl_name)
         except adapters.AdapterError as exc:

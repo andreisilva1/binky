@@ -121,13 +121,17 @@ class ExternalAdapter(Adapter):
 # --------------------------------------------------------------------------- #
 _REGISTRY: dict[str, type[Adapter]] = {}
 
-# First-party adapters that need an optional driver. They are imported on first use,
+# First-party adapters living in `builtin_adapters`. They are imported on first use,
 # not at import time, so `import warren` stays free of boto3/pymongo/... and a missing
 # extra fails where the user can act on it — with the exact `pip install` to run.
+# Several names map to one class: those backends are protocol-compatible forks or
+# share an API, so the slice and the code are genuinely identical.
 _LAZY: dict[str, str] = {
     "redis": "RedisAdapter",
+    "valkey": "RedisAdapter",
     "mysql": "MySQLAdapter",
     "mariadb": "MySQLAdapter",
+    "percona": "MySQLAdapter",
     "mongodb": "MongoAdapter",
     "s3": "S3Adapter",
     "minio": "S3Adapter",
@@ -135,6 +139,9 @@ _LAZY: dict[str, str] = {
     "kafka": "KafkaAdapter",
     "redpanda": "KafkaAdapter",
     "qdrant": "QdrantAdapter",
+    "clickhouse": "ClickHouseAdapter",
+    "elasticsearch": "ElasticsearchAdapter",
+    "opensearch": "ElasticsearchAdapter",
 }
 
 

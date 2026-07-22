@@ -8,17 +8,22 @@ Every adapter carves a *slice* of a server you already run. The isolation
 primitive differs per backend, and the docstring on each class says exactly what
 it is, because that is the thing you need to trust:
 
-===========  ==============================================  =======
-adapter      slice                                           clone
-===========  ==============================================  =======
-redis        one logical DB (capped by the server's count)    yes
-mysql        one database                                     if mysqldump is on PATH
-mongodb      one database                                     yes
-s3/minio     one bucket                                       yes
-rabbitmq     one vhost                                        n/a — a fresh vhost is already clean
-kafka        one topic prefix                                 no
-qdrant       one collection prefix                            no
-===========  ==============================================  =======
+=============  ==============================================  =======
+adapter        slice                                           clone
+=============  ==============================================  =======
+redis          one logical DB (capped by the server's count)    yes
+mysql          one database                                     if mysqldump is on PATH
+mongodb        one database                                     yes
+s3/minio       one bucket                                       yes
+rabbitmq       one vhost                                        n/a — a fresh vhost is already clean
+kafka          one topic prefix                                 no
+qdrant         one collection prefix                            no
+clickhouse     one database                                     no — see the class docstring
+elasticsearch  one index prefix                                 no
+=============  ==============================================  =======
+
+``redis`` also answers to ``valkey``, ``mysql`` to ``percona``, and
+``elasticsearch`` to ``opensearch`` — same wire protocol, same slice.
 """
 
 from __future__ import annotations
@@ -63,29 +68,40 @@ def _fit(name: str, limit: int) -> str:
     return f"{name[: limit - 9].rstrip('-_')}-{digest}"
 
 
+def _split_auth(base: str) -> tuple[str, dict[str, str]]:
+    """Split a URL into its bare root and the basic-auth header its userinfo implies.
+
+    Credentials belong in the header, not in the request line — a URL with
+    userinfo tends to end up in logs and proxy access lines verbatim.
+    """
+    parts = urllib.parse.urlsplit(base)
+    root = urllib.parse.urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], "", "", ""))
+    headers: dict[str, str] = {}
+    if parts.username:
+        raw = f"{urllib.parse.unquote(parts.username)}:{urllib.parse.unquote(parts.password or '')}"
+        headers["authorization"] = "Basic " + base64.b64encode(raw.encode()).decode()
+    return root, headers
+
+
 def _http(
     base: str,
     path: str,
     method: str = "GET",
     body: dict | None = None,
     headers: dict | None = None,
-) -> dict | None:
+) -> dict | list | None:
     """Minimal JSON-over-HTTP call with basic auth taken from the URL's userinfo.
 
-    RabbitMQ and Qdrant both expose plain REST management APIs, so using urllib
-    here keeps two whole adapters dependency-free.
+    RabbitMQ, Qdrant and Elasticsearch all expose plain REST APIs, so using urllib
+    here keeps three whole adapters dependency-free.
     """
-    parts = urllib.parse.urlsplit(base)
-    root = urllib.parse.urlunsplit((parts.scheme, parts.netloc.rsplit("@", 1)[-1], "", "", ""))
+    root, auth = _split_auth(base)
     request = urllib.request.Request(
         root + path,
         method=method,
         data=json.dumps(body).encode() if body is not None else None,
-        headers={"content-type": "application/json", **(headers or {})},
+        headers={"content-type": "application/json", **auth, **(headers or {})},
     )
-    if parts.username:
-        raw = f"{urllib.parse.unquote(parts.username)}:{urllib.parse.unquote(parts.password or '')}"
-        request.add_header("authorization", "Basic " + base64.b64encode(raw.encode()).decode())
     try:
         with urllib.request.urlopen(request, timeout=15) as response:
             payload = response.read()
@@ -203,8 +219,9 @@ class MySQLAdapter(Adapter):
 
     MySQL has no `CREATE DATABASE ... TEMPLATE`, so cloning shells out to
     `mysqldump | mysql`. The capability is therefore *dynamic*: if those binaries
-    aren't on PATH, the adapter reports `clone: false` and `clone_from` degrades to
-    per-worktree migrate+seed instead of silently producing a partial copy.
+    aren't on PATH — or are too old to authenticate against this server — the adapter
+    reports `clone: false` and `clone_from` degrades to per-worktree migrate+seed
+    instead of silently producing a partial copy.
     """
 
     def __init__(self, config: dict) -> None:
@@ -213,9 +230,39 @@ class MySQLAdapter(Adapter):
         if not self.admin_url:
             raise AdapterError("mysql adapter needs an admin_url (or $WARREN_MYSQL_URL)")
         self._parts = urllib.parse.urlsplit(self.admin_url)
+        self._clone_ok: bool | None = None
 
     def capabilities(self) -> dict:
-        return {"clone": bool(shutil.which("mysqldump") and shutil.which("mysql"))}
+        if self._clone_ok is None:
+            self._clone_ok = (
+                bool(shutil.which("mysqldump") and shutil.which("mysql")) and self._client_works()
+            )
+        return {"clone": self._clone_ok}
+
+    def _client_works(self) -> bool:
+        """Can the client on PATH actually talk to *this* server?
+
+        Presence on PATH is not enough: a client older than the server cannot load
+        the server's default auth plugin (`caching_sha2_password` on MySQL 8), and
+        fails only once the dump is already under way. Probing once here turns that
+        into an accurate `clone: false` up front — `ops` only asks for capabilities
+        when `clone_from` is set, so this costs one round trip per cloning service.
+        """
+        try:
+            probe = subprocess.run(
+                ["mysql", *self._cli_args(), "-e", "SELECT 1"],
+                capture_output=True, env=self._cli_env(), check=False, timeout=15,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return probe.returncode == 0
+
+    def _cli_env(self) -> dict:
+        # The password goes through MYSQL_PWD, not argv — argv is world-readable in `ps`.
+        env = {**os.environ}
+        if self._parts.password:
+            env["MYSQL_PWD"] = urllib.parse.unquote(self._parts.password)
+        return env
 
     def _connect(self):
         pymysql = _driver("pymysql", "mysql")
@@ -263,27 +310,45 @@ class MySQLAdapter(Adapter):
 
     def clone(self, source_slice: str, dest_slice: str) -> None:
         if not self.capabilities()["clone"]:
-            raise AdapterError("mysql clone needs `mysqldump` and `mysql` on PATH")
+            raise AdapterError(
+                "mysql clone needs a working `mysqldump` and `mysql` on PATH "
+                "(present, and new enough to authenticate against this server)"
+            )
         source, dest = self._ident(source_slice), self._ident(dest_slice)
         self.provision(dest_slice)
-        # The password goes through MYSQL_PWD, not argv — argv is world-readable in `ps`.
-        env = {**os.environ}
-        if self._parts.password:
-            env["MYSQL_PWD"] = urllib.parse.unquote(self._parts.password)
+        env = self._cli_env()
         dump = subprocess.run(
             ["mysqldump", *self._cli_args(), "--routines", "--triggers", "--events",
              "--single-transaction", "--no-tablespaces", source],
             capture_output=True, env=env, check=False,
         )
         if dump.returncode != 0:
-            raise AdapterError(f"mysqldump failed: {dump.stderr.decode(errors='replace')[:300]}")
+            raise AdapterError(f"mysqldump failed: {self._client_error(dump.stderr)}")
         load = subprocess.run(
             ["mysql", *self._cli_args(), dest],
             input=dump.stdout, capture_output=True, env=env, check=False,
         )
         if load.returncode != 0:
-            detail = load.stderr.decode(errors="replace")[:300]
-            raise AdapterError(f"mysql restore failed: {detail}")
+            raise AdapterError(f"mysql restore failed: {self._client_error(load.stderr)}")
+
+    @staticmethod
+    def _client_error(stderr: bytes) -> str:
+        """Translate the client's failure into something the user can act on.
+
+        A `mysqldump` older than the server it is dumping fails to load the server's
+        default auth plugin, and says so in a way that reads like a broken install
+        rather than a version mismatch. Warren has already fallen back to per-worktree
+        migrate+seed by the time this is read, so the message says what to fix, not
+        what broke.
+        """
+        detail = stderr.decode(errors="replace").strip()[:300]
+        if "caching_sha2_password" in detail or "1045" in detail:
+            detail += (
+                " — the `mysqldump` on PATH is most likely older than the server it is "
+                "dumping. Slices still work (Warren falls back to per-worktree "
+                "migrate+seed); upgrade the MySQL client to get instant clones back."
+            )
+        return detail
 
 
 # --------------------------------------------------------------------------- #
@@ -617,3 +682,134 @@ class QdrantAdapter(Adapter):
         for name in names:
             if name == prefix or name.startswith(prefix + self.SEP):
                 self._get(f"/collections/{urllib.parse.quote(name, safe='')}", "DELETE")
+
+
+# --------------------------------------------------------------------------- #
+#  ClickHouse — one database per worktree
+# --------------------------------------------------------------------------- #
+class ClickHouseAdapter(Adapter):
+    """One database per worktree, over ClickHouse's HTTP interface.
+
+    Same shape as the Postgres adapter — ``CREATE DATABASE`` / ``DROP DATABASE`` —
+    and it needs no driver at all: ClickHouse accepts SQL as a plain HTTP POST body,
+    so this adapter is stdlib-only.
+
+    No ``clone``. ClickHouse has no ``CREATE DATABASE ... AS``; copying would mean
+    ``INSERT INTO dest SELECT * FROM source`` per table, which is O(rows) — exactly
+    the cost ``clone_from`` exists to avoid. Reporting ``clone: false`` makes
+    ``clone_from`` fall back to per-worktree migrate+seed, which is honest, rather
+    than dressing a full table copy up as an instant snapshot.
+
+    ``admin_url`` is the HTTP endpoint (default port 8123), e.g.
+    ``http://default:@localhost:8123``; it is also what the resolved address is
+    built from, with the slice's database as the path.
+    """
+
+    def __init__(self, config: dict) -> None:
+        super().__init__(config)
+        self.admin_url = config.get("admin_url") or os.environ.get("WARREN_CLICKHOUSE_URL")
+        if not self.admin_url:
+            raise AdapterError(
+                "clickhouse adapter needs an admin_url pointing at the HTTP interface "
+                "(e.g. http://default:@localhost:8123), or $WARREN_CLICKHOUSE_URL"
+            )
+
+    def _query(self, sql: str) -> str:
+        root, headers = _split_auth(self.admin_url)
+        request = urllib.request.Request(
+            root + "/", method="POST", data=sql.encode(), headers=headers
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return response.read().decode(errors="replace")
+        except urllib.error.HTTPError as exc:
+            # ClickHouse reports SQL errors as 500 with the message in the body.
+            detail = exc.read().decode(errors="replace").strip()[:300]
+            raise AdapterError(f"clickhouse query failed: {exc.code} {detail}") from exc
+        except OSError as exc:
+            raise AdapterError(f"could not reach clickhouse at {root}: {exc}") from exc
+
+    @staticmethod
+    def _ident(slice_name: str) -> str:
+        # A ClickHouse database becomes a directory on disk, so keep it to the same
+        # conservative alphabet the other SQL adapters use and assert it, since the
+        # name is interpolated into DDL.
+        name = _fit(slice_name, 63)
+        if not re.fullmatch(r"[A-Za-z0-9_]+", name):
+            raise AdapterError(f"unsafe clickhouse database name: {slice_name!r}")
+        return name
+
+    def provision(self, slice_name: str) -> None:
+        self._query(f'CREATE DATABASE IF NOT EXISTS "{self._ident(slice_name)}"')
+
+    def resolve(self, slice_name: str) -> str:
+        return _with_dbname(self.admin_url, self._ident(slice_name))
+
+    def teardown(self, slice_name: str) -> None:
+        self._query(f'DROP DATABASE IF EXISTS "{self._ident(slice_name)}"')
+
+
+# --------------------------------------------------------------------------- #
+#  Elasticsearch / OpenSearch — one index prefix per worktree
+# --------------------------------------------------------------------------- #
+class ElasticsearchAdapter(Adapter):
+    """One index prefix per worktree, for Elasticsearch or OpenSearch.
+
+    Both speak the same index CRUD API, so one class serves both names.
+
+    Like Kafka's, this slice is a *prefix*: your app writes to ``<prefix>-products``
+    instead of ``products``. It is enforced by your app honouring the prefix, not by
+    the server — Elasticsearch has no tenant primitive below the cluster.
+
+    ``provision`` only checks reachability by default, because an index's mappings
+    belong to your app, not to Warren; list ``options.indices`` to have them created
+    empty up front. Teardown enumerates indices and deletes the ones under the prefix
+    by exact name — never by wildcard, which ES 8 refuses by default
+    (``action.destructive_requires_name``) and which would be a bad thing to teach.
+    """
+
+    SEP: ClassVar[str] = "-"
+
+    def __init__(self, config: dict) -> None:
+        super().__init__(config)
+        self.admin_url = (
+            config.get("admin_url")
+            or os.environ.get("WARREN_ELASTICSEARCH_URL")
+            or "http://localhost:9200"
+        ).rstrip("/")
+        self.api_key = config.get("api_key")
+        self.indices = [i.strip() for i in (config.get("indices") or "").split(",") if i.strip()]
+
+    def _call(self, path: str, method: str = "GET", body: dict | None = None):
+        headers = {"authorization": f"ApiKey {self.api_key}"} if self.api_key else None
+        return _http(self.admin_url, path, method, body, headers)
+
+    @staticmethod
+    def _prefix(slice_name: str) -> str:
+        # Index names are lowercase and cannot contain \/*?"<>| , # or a leading
+        # -, _ or +. The slice name is already [a-z0-9_], so this is belt-and-braces.
+        name = re.sub(r"[^a-z0-9_.-]", "-", slice_name.lower()).lstrip("-_+.")
+        return _fit(name, 200)  # ES caps index names at 255 bytes; leave room for the suffix
+
+    def _owned(self, slice_name: str) -> list[str]:
+        prefix = self._prefix(slice_name)
+        listing = self._call("/_cat/indices?format=json&h=index") or []
+        names = [row["index"] for row in listing if isinstance(row, dict) and "index" in row]
+        return [n for n in names if n == prefix or n.startswith(prefix + self.SEP)]
+
+    def provision(self, slice_name: str) -> None:
+        # Reachability first: failing here beats failing at your app's first write.
+        self._call("/")
+        prefix = self._prefix(slice_name)
+        existing = set(self._owned(slice_name))
+        for index in self.indices:
+            name = f"{prefix}{self.SEP}{index}"
+            if name not in existing:
+                self._call(f"/{urllib.parse.quote(name, safe='')}", "PUT", {})
+
+    def resolve(self, slice_name: str) -> str:
+        return f"{self.admin_url}/{self._prefix(slice_name)}"
+
+    def teardown(self, slice_name: str) -> None:
+        for name in self._owned(slice_name):
+            self._call(f"/{urllib.parse.quote(name, safe='')}", "DELETE")

@@ -175,6 +175,75 @@ def test_clone_from_falls_back_when_adapter_cannot_clone(tmp_path, monkeypatch) 
         reg.close()
 
 
+def test_clone_from_falls_back_when_the_clone_itself_fails(tmp_path, monkeypatch) -> None:
+    """A clone that *claims* to work but fails must degrade, not fail `up`.
+
+    `capabilities()` describes the adapter; it cannot know the machine. A client
+    binary too old for the server, a missing grant, a full disk — all surface here.
+    The world Warren hands back must still be correct, just built the slow way, and
+    the dest slice must be torn down first so migrate never runs into a half-copy.
+    """
+    monkeypatch.setenv("WARREN_HOME", str(tmp_path / "home"))
+    counter = tmp_path / "migrate_runs.txt"
+    monkeypatch.setenv("COUNTER", str(counter))
+
+    torn_down: list[str] = []
+
+    class BrokenCloneFake(adapters.Adapter):
+        CAPABILITIES: ClassVar[dict] = {"clone": True}  # promises, then can't deliver
+        store: ClassVar[set[str]] = set()
+
+        def provision(self, slice_name: str) -> None:
+            BrokenCloneFake.store.add(slice_name)
+
+        def resolve(self, slice_name: str) -> str:
+            return f"broken://{slice_name}"
+
+        def teardown(self, slice_name: str) -> None:
+            torn_down.append(slice_name)
+            BrokenCloneFake.store.discard(slice_name)
+
+        def clone(self, source_slice: str, dest_slice: str) -> None:
+            BrokenCloneFake.store.add(dest_slice)  # a half-copy, like a failed dump
+            raise adapters.AdapterError("mysqldump failed: client too old")
+
+    adapters.register("brokenclone", BrokenCloneFake)
+    BrokenCloneFake.store.clear()
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "bump.py").write_text(
+        "import os\nopen(os.environ['COUNTER'], 'a').write('x')\n", encoding="utf-8"
+    )
+    py = sys.executable
+    (proj / "warren.toml").write_text(
+        '[project]\nname = "acme"\n'
+        '[services.db]\n'
+        'adapter = "brokenclone"\n'
+        'clone_from = "golden"\n'
+        f"migrate = '\"{py}\" bump.py'\n",
+        encoding="utf-8",
+    )
+    _init_git(proj)
+
+    reg = Registry.connect(tmp_path / "home" / "warren.db")
+    pm = ProcessManager()
+    try:
+        ops.up(reg, pm, {"root": str(proj), "worktree": "a"})  # must not raise
+
+        assert "acme_a" in BrokenCloneFake.store  # the worktree still got its slice
+        assert "acme_a" in torn_down  # the half-copy was cleared before the retry
+        # migrate ran twice: once into the golden, once into the worktree it fell back to
+        assert counter.read_text(encoding="utf-8") == "xx"
+
+        events = (tmp_path / "home" / "events.log").read_text(encoding="utf-8")
+        assert "clone_fallback" in events  # degraded loudly, not silently
+        assert "client too old" in events  # and says why
+    finally:
+        pm.stop_all()
+        reg.close()
+
+
 def test_adapter_address_injected_into_env() -> None:
     cfg = load_config_data(
         {
