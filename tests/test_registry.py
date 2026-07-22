@@ -19,7 +19,7 @@ def test_wal_and_schema_version(reg: Registry) -> None:
     mode = reg._conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode == "wal"
     ver = reg._conn.execute("PRAGMA user_version").fetchone()[0]
-    assert ver == 1
+    assert ver == 2
 
 
 def test_create_and_get_worktree(reg: Registry) -> None:
@@ -135,3 +135,29 @@ def test_default_db_path_respects_warren_home(tmp_path: Path, monkeypatch) -> No
     from warren.registry import default_db_path
 
     assert default_db_path() == tmp_path / "home" / "warren.db"
+
+
+def test_fresh_db_is_at_current_schema(tmp_path: Path) -> None:
+    reg = Registry.connect(tmp_path / "warren.db")
+    version = reg._conn.execute("PRAGMA user_version").fetchone()[0]
+    assert version == 2
+    reg.close()
+
+
+def test_migrates_legacy_v1_database(tmp_path: Path) -> None:
+    """A v1 registry (no verify_status) is upgraded in place, not stranded."""
+    db = tmp_path / "warren.db"
+    legacy = sqlite3.connect(db)
+    legacy.execute(
+        "CREATE TABLE worktrees (id INTEGER PRIMARY KEY, project TEXT, name TEXT, path TEXT,"
+        " branch TEXT, status TEXT, created_at INTEGER, updated_at INTEGER, UNIQUE(project, name))"
+    )
+    legacy.execute("PRAGMA user_version=1")
+    legacy.commit()
+    legacy.close()
+
+    reg = Registry.connect(db)
+    columns = {row[1] for row in reg._conn.execute("PRAGMA table_info(worktrees)")}
+    assert "verify_status" in columns  # migration added it
+    assert reg._conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    reg.close()

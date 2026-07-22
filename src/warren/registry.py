@@ -22,7 +22,19 @@ from pathlib import Path
 
 from warren import paths
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+
+def _migrate_2_verify_status(conn: sqlite3.Connection) -> None:
+    """v1 → v2: add worktrees.verify_status (idempotent — fresh DBs already have it)."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(worktrees)")}
+    if "verify_status" not in columns:
+        conn.execute("ALTER TABLE worktrees ADD COLUMN verify_status TEXT")
+
+
+# version -> upgrade step. Applied in order for any DB below SCHEMA_VERSION, so a
+# Warren upgrade never strands an existing registry. Steps must be idempotent.
+_MIGRATIONS = {2: _migrate_2_verify_status}
 
 
 class WorktreeStatus(StrEnum):
@@ -167,8 +179,21 @@ class Registry:
         return conn
 
     def _ensure_schema(self) -> None:
-        self._conn.executescript(_SCHEMA)
-        self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+        self._conn.executescript(_SCHEMA)  # base tables (IF NOT EXISTS)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        current = self._conn.execute("PRAGMA user_version").fetchone()[0]
+        if current >= SCHEMA_VERSION:
+            return
+        if current == 0:  # brand-new DB, created at the latest schema
+            self._conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            return
+        for version in range(current + 1, SCHEMA_VERSION + 1):  # upgrade an older registry
+            migrate = _MIGRATIONS.get(version)
+            if migrate is not None:
+                migrate(self._conn)
+            self._conn.execute(f"PRAGMA user_version={version}")
 
     def close(self) -> None:
         with self._conns_lock:
