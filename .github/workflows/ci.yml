@@ -81,15 +81,18 @@ jobs:
             -e MINIO_ROOT_USER=minioadmin -e MINIO_ROOT_PASSWORD=minioadmin \
             minio/minio server /data
 
+      # Not a TCP probe: `docker run -p` binds the host port through docker-proxy
+      # the instant the container is created, so a connect succeeds long before
+      # anything inside is listening. Ask the server itself.
       - name: Wait for MinIO
         run: |
           for _ in $(seq 1 60); do
-            if timeout 1 bash -c "</dev/tcp/127.0.0.1/9000" 2>/dev/null; then
+            if curl -fsS http://127.0.0.1:9000/minio/health/live >/dev/null 2>&1; then
               echo "minio is up"; exit 0
             fi
             sleep 2
           done
-          echo "minio never came up"; exit 1
+          echo "minio never came up"; docker logs minio || true; exit 1
 
       # MySQL reports `clone` only when a client that can authenticate against the
       # server is on PATH. Ubuntu's `mysql-client` matches the mysql:8 service, so
@@ -170,18 +173,32 @@ jobs:
             -e KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0 \
             apache/kafka:3.9.0
 
+      # An open port proves nothing here: docker-proxy binds the host side as soon
+      # as the container is created, so `</dev/tcp/...` succeeds while the server
+      # inside is still booting — which is how Elasticsearch got as far as the test
+      # run and reset the connection mid-request. Ask each server whether it is
+      # ready. Kafka speaks no HTTP, so it keeps the TCP check; its client retries
+      # on its own, which is what covered the gap there.
       - name: Wait for them
         run: |
-          for port in 6333 8123 9200 9092; do
-            up=""
+          ready() {
+            name="$1"; url="$2"
             for _ in $(seq 1 90); do
-              if timeout 1 bash -c "</dev/tcp/127.0.0.1/$port" 2>/dev/null; then
-                up=yes; echo "port $port is up"; break
-              fi
+              if curl -fsS "$url" >/dev/null 2>&1; then echo "$name is ready"; return 0; fi
               sleep 2
             done
-            if [ -z "$up" ]; then echo "port $port never came up"; exit 1; fi
+            echo "$name never became ready"; docker logs "$name" || true; return 1
+          }
+          ready qdrant        http://127.0.0.1:6333/readyz
+          ready clickhouse    http://127.0.0.1:8123/ping
+          ready elasticsearch "http://127.0.0.1:9200/_cluster/health?wait_for_status=yellow&timeout=5s"
+          for _ in $(seq 1 90); do
+            if timeout 1 bash -c "</dev/tcp/127.0.0.1/9092" 2>/dev/null; then
+              echo "kafka port is up"; exit 0
+            fi
+            sleep 2
           done
+          echo "kafka never came up"; docker logs kafka || true; exit 1
 
       - name: Install
         run: python -m pip install -e ".[dev,all-adapters]"

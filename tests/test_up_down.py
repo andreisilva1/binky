@@ -38,6 +38,12 @@ def _make_project(tmp_path: Path) -> Path:
     (proj / "binky.toml").write_text(
         '[project]\n'
         'name = "demo"\n'
+        # Pin the admission ceiling instead of inheriting the machine's. It defaults
+        # to max(2, min(RAM_GB // 2, cores)), which is 2 on a small CI runner — and a
+        # slot is held until `down`, so the third of three concurrent ups would queue
+        # until the RPC timed out. That is admission working; these tests are about
+        # ports and git, so they should not also be a test of how big the box is.
+        'max_parallel = 3\n'
         '[services.sleeper]\n'
         f"cmd = '\"{py}\" sleeper.py'\n"
         '[services.web]\n'
