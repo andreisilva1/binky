@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, TYPE_CHECKING
 
+from binky.procs import NO_WINDOW
+
 if TYPE_CHECKING:
     from binky.config import Limits
 
@@ -48,6 +50,7 @@ def _new_group_kwargs() -> dict:
         return {
             "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP
             | subprocess.BELOW_NORMAL_PRIORITY_CLASS
+            | NO_WINDOW  # no flashing console per service start
         }
     return {"start_new_session": True, "preexec_fn": _renice}
 
@@ -89,7 +92,8 @@ def _kill_tree(proc: subprocess.Popen) -> None:
     try:
         if os.name == "nt":
             subprocess.run(
-                ["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, check=False
+                ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                capture_output=True, check=False, creationflags=NO_WINDOW,
             )
         else:
             os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -101,7 +105,8 @@ def kill_pid(pid: int) -> None:
     """Kill a process and its group/tree by pid — best effort (used by reconcile)."""
     if os.name == "nt":
         subprocess.run(
-            ["taskkill", "/F", "/T", "/PID", str(pid)], capture_output=True, check=False
+            ["taskkill", "/F", "/T", "/PID", str(pid)],
+            capture_output=True, check=False, creationflags=NO_WINDOW,
         )
     else:
         with contextlib.suppress(ProcessLookupError, OSError):

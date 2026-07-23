@@ -42,6 +42,7 @@ import urllib.request
 from typing import ClassVar
 
 from binky.adapters import Adapter, AdapterError, _with_dbname
+from binky.procs import NO_WINDOW
 
 
 # --------------------------------------------------------------------------- #
@@ -252,6 +253,7 @@ class MySQLAdapter(Adapter):
             probe = subprocess.run(
                 ["mysql", *self._cli_args(), "-e", "SELECT 1"],
                 capture_output=True, env=self._cli_env(), check=False, timeout=15,
+                creationflags=NO_WINDOW,
             )
         except (OSError, subprocess.SubprocessError):
             return False
@@ -329,13 +331,14 @@ class MySQLAdapter(Adapter):
         dump = subprocess.run(
             ["mysqldump", *self._cli_args(), "--routines", "--triggers", "--events",
              "--single-transaction", "--no-tablespaces", source],
-            capture_output=True, env=env, check=False,
+            capture_output=True, env=env, check=False, creationflags=NO_WINDOW,
         )
         if dump.returncode != 0:
             raise AdapterError(f"mysqldump failed: {self._client_error(dump.stderr)}")
         load = subprocess.run(
             ["mysql", *self._cli_args(), dest],
             input=dump.stdout, capture_output=True, env=env, check=False,
+            creationflags=NO_WINDOW,
         )
         if load.returncode != 0:
             raise AdapterError(f"mysql restore failed: {self._client_error(load.stderr)}")

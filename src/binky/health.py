@@ -22,6 +22,7 @@ import urllib.request
 
 from binky import resolve
 from binky.config import Service
+from binky.procs import NO_WINDOW
 
 DEFAULT_TIMEOUT = 30.0
 
@@ -45,7 +46,9 @@ def _tcp_ok(port: int, timeout: float = 2.0) -> bool:
 
 
 def _cmd_ok(command: str, cwd: str) -> bool:
-    result = subprocess.run(command, cwd=cwd, shell=True, capture_output=True, check=False)
+    result = subprocess.run(
+        command, cwd=cwd, shell=True, capture_output=True, check=False, creationflags=NO_WINDOW
+    )
     return result.returncode == 0
 
 

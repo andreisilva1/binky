@@ -17,6 +17,7 @@ from pathlib import Path
 
 from binky import adapters, allocator, git, health, observability, paths, resolve
 from binky.config import ConfigError, load_config
+from binky.procs import NO_WINDOW
 from binky.registry import Registry, WorktreeStatus
 from binky.rpc import RpcFault
 from binky.supervisor import ProcessManager, kill_pid
@@ -197,6 +198,7 @@ def _run_hook(command: str | None, kind: str, sname: str, wt, svc, address: str)
         text=True,
         env={**os.environ, "DATABASE_URL": address},
         check=False,
+        creationflags=NO_WINDOW,
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
@@ -305,7 +307,7 @@ def verify(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     for command in checks:
         proc = subprocess.run(
             command, cwd=wt.path, shell=True, capture_output=True, text=True,
-            env=check_env, check=False,
+            env=check_env, check=False, creationflags=NO_WINDOW,
         )
         ok = proc.returncode == 0
         passed_all = passed_all and ok
@@ -379,7 +381,7 @@ def _run_setup(svc, sname: str, project: str, worktree: str, cwd: str, env: dict
         return
     result = subprocess.run(
         svc.setup, cwd=cwd, shell=True, env={**os.environ, **env},
-        capture_output=True, text=True, check=False,
+        capture_output=True, text=True, check=False, creationflags=NO_WINDOW,
     )
     if result.returncode != 0:
         detail = (result.stderr or result.stdout).strip()
@@ -399,7 +401,10 @@ def _run_lifecycle_hook(command: str | None, wt_path: str, worktree: str) -> Non
         return
     resolved = resolve.resolve(command, "", {}, worktree)
     with contextlib.suppress(Exception):
-        subprocess.run(resolved, cwd=wt_path, shell=True, capture_output=True, check=False)
+        subprocess.run(
+            resolved, cwd=wt_path, shell=True, capture_output=True, check=False,
+            creationflags=NO_WINDOW,
+        )
 
 
 def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:

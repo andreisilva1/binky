@@ -11,6 +11,8 @@ import subprocess
 import threading
 from pathlib import Path
 
+from binky.procs import NO_WINDOW
+
 
 class GitError(Exception):
     """A git command failed."""
@@ -32,7 +34,8 @@ def _repo_lock(root: str | Path) -> threading.Lock:
 
 def _run(args: list[str], cwd: str | Path) -> str:
     result = subprocess.run(
-        ["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False
+        ["git", *args], cwd=str(cwd), capture_output=True, text=True, check=False,
+        creationflags=NO_WINDOW,
     )
     if result.returncode != 0:
         raise GitError((result.stderr or result.stdout).strip())

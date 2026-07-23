@@ -27,6 +27,7 @@ import subprocess
 from pathlib import Path
 
 from binky import paths
+from binky.procs import NO_WINDOW
 
 
 def caddy_binary() -> str | None:
@@ -84,7 +85,8 @@ class Caddy:
         env = {**os.environ, "XDG_DATA_HOME": str(data), "XDG_CONFIG_HOME": str(data)}
         try:
             self._proc = subprocess.Popen(
-                self._argv(caddyfile), env=env, stdout=log, stderr=subprocess.STDOUT
+                self._argv(caddyfile), env=env, stdout=log, stderr=subprocess.STDOUT,
+                creationflags=NO_WINDOW,
             )
         except OSError:
             log.close()

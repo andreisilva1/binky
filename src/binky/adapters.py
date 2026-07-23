@@ -32,6 +32,8 @@ from abc import ABC, abstractmethod
 from typing import ClassVar
 from urllib.parse import urlparse, urlunparse
 
+from binky.procs import NO_WINDOW
+
 
 class AdapterError(Exception):
     """An adapter operation failed (bad config, driver missing, resource error)."""
@@ -85,6 +87,7 @@ class ExternalAdapter(Adapter):
                 capture_output=True,
                 text=True,
                 check=False,
+                creationflags=NO_WINDOW,
             )
         except OSError as exc:
             raise AdapterError(f"could not run adapter {self._command}: {exc}") from exc
