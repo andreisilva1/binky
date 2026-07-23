@@ -241,13 +241,17 @@ class Daemon:
         try:
             async with server:
                 await self._stop.wait()
+                # Retract the endpoint here, *inside* the `async with`. Leaving the
+                # block awaits server.wait_closed(), which on Windows' Proactor loop
+                # can stall until the in-flight shutdown connection drains — while
+                # the listening socket is already closed, so is_running() reads
+                # False. Clearing only in `finally` (after wait_closed) therefore
+                # left a window where the daemon was unreachable but daemon.json was
+                # still on disk, which is exactly what a caller polling stop() saw.
+                ipc.clear_daemon_info()
         finally:
-            # Retract the endpoint first. The listening socket closed when the
-            # `async with` exited, so from here on daemon.json advertises an address
-            # that refuses connections — and the teardown below is the slow part
-            # (stop_all waits up to five seconds per worktree). Clearing it last
-            # left a window where the daemon was unreachable but still looked like
-            # it was there, which is exactly what a caller polling for shutdown sees.
+            # Idempotent, and covers the path where _stop was never set (a crash on
+            # startup) so the endpoint file is never left behind.
             ipc.clear_daemon_info()
             if sock_path is not None:
                 _unlink(sock_path)

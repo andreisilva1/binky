@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from _demo_app import WEB_SERVER_PY
 from binky import daemon, ipc, ops
 from binky.config import load_config_data
 
@@ -61,11 +62,12 @@ def _project(tmp_path: Path, *, verify_ok: bool = True, expose: list[str] | None
     (proj / "check.py").write_text(
         f"import sys\nsys.exit({0 if verify_ok else 1})\n", encoding="utf-8"
     )
+    (proj / "server.py").write_text(WEB_SERVER_PY, encoding="utf-8")
     expose_line = f"expose = {expose!r}\n" if expose is not None else ""
     (proj / "binky.toml").write_text(
         '[project]\nname = "demo"\n'
         '[services.web]\n'
-        f"cmd = '\"{py}\" -m http.server ${{self.port}}'\n"
+        f"cmd = '\"{py}\" server.py ${{self.port}}'\n"
         'url = "web"\n'
         '[agents]\n'
         + expose_line

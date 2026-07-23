@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from _demo_app import WEB_SERVER_PY
 from binky import daemon, ipc, paths
 
 
@@ -33,6 +34,7 @@ def _make_project(tmp_path: Path) -> Path:
     (proj / "sleeper.py").write_text(
         "import time\nprint('hello from binky', flush=True)\ntime.sleep(15)\n", encoding="utf-8"
     )
+    (proj / "server.py").write_text(WEB_SERVER_PY, encoding="utf-8")
     py = sys.executable
     # single-quoted TOML literal strings so Windows backslashes stay literal
     (proj / "binky.toml").write_text(
@@ -47,7 +49,7 @@ def _make_project(tmp_path: Path) -> Path:
         '[services.sleeper]\n'
         f"cmd = '\"{py}\" sleeper.py'\n"
         '[services.web]\n'
-        f"cmd = '\"{py}\" -m http.server ${{self.port}}'\n"
+        f"cmd = '\"{py}\" server.py ${{self.port}}'\n"
         'url = "web"\n'
         'depends_on = ["sleeper"]\n',
         encoding="utf-8",
