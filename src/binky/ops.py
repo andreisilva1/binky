@@ -17,7 +17,7 @@ from pathlib import Path
 
 from binky import adapters, allocator, git, health, observability, paths, resolve
 from binky.config import ConfigError, load_config
-from binky.procs import NO_WINDOW
+from binky.procs import NO_WINDOW, is_same_process
 from binky.registry import Registry, WorktreeStatus
 from binky.rpc import RpcFault
 from binky.supervisor import ProcessManager, kill_pid
@@ -519,13 +519,18 @@ def reconcile(reg: Registry) -> None:
     """On daemon startup, converge the registry against reality.
 
     The daemon manages no processes yet, so any recorded PIDs are orphans from
-    before the restart — kill them. Then: half-created ``provisioning`` worktrees
-    are swept (C); ``ready`` worktrees (whose processes just died with the daemon)
-    drop to ``stopped``; ``stopped`` worktrees are left untouched (never GC'd).
+    before the restart — kill the ones that are *still the same process* we
+    recorded, and only those. A pid whose birth time no longer matches (or is
+    gone) belongs to a stranger the OS handed the recycled number to after a
+    reboot; killing it would be friendly fire, so we skip it and just drop the
+    stale row. Then: half-created ``provisioning`` worktrees are swept (C);
+    ``ready`` worktrees (whose processes died with the daemon) drop to
+    ``stopped``; ``stopped`` worktrees are left untouched (never GC'd).
     """
     for wt in reg.list_worktrees():
-        for pid in reg.processes_for(wt.id):
-            kill_pid(pid)
+        for pid, create_time in reg.process_identities(wt.id):
+            if is_same_process(pid, create_time):
+                kill_pid(pid)
         reg.clear_processes(wt.id)
         if wt.status == WorktreeStatus.provisioning:
             with contextlib.suppress(Exception):

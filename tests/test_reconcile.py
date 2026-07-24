@@ -3,6 +3,7 @@
 import contextlib
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from binky import ops, supervisor
@@ -38,6 +39,30 @@ def test_reconcile_kills_orphans_and_sweeps(tmp_path: Path) -> None:
     finally:
         with contextlib.suppress(Exception):
             orphan_proc.kill()
+        reg.close()
+
+
+def test_reconcile_spares_a_recycled_pid(tmp_path: Path) -> None:
+    """A recorded pid whose birth time no longer matches is a stranger the OS handed
+    the recycled number to — reconcile must drop the stale row but never kill it."""
+    reg = Registry.connect(tmp_path / "binky.db")
+    bystander = subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], **supervisor._new_group_kwargs()
+    )
+    try:
+        wt = reg.create_worktree("p", "a", "/x", "a", status=WorktreeStatus.ready)
+        # recorded with a birth time from long before this pid's real one → identity
+        # mismatch, i.e. "the process we knew is gone; something else holds its pid now".
+        reg.add_process(wt.id, bystander.pid, create_time=1.0)
+
+        ops.reconcile(reg)
+
+        assert reg.processes_for(wt.id) == []  # the stale row is dropped either way
+        time.sleep(0.3)
+        assert bystander.poll() is None  # ...but the innocent bystander was spared
+    finally:
+        with contextlib.suppress(Exception):
+            bystander.kill()
         reg.close()
 
 

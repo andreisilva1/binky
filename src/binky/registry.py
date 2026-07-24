@@ -20,9 +20,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from binky import paths
+from binky import paths, procs
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def _migrate_2_verify_status(conn: sqlite3.Connection) -> None:
@@ -32,9 +32,17 @@ def _migrate_2_verify_status(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE worktrees ADD COLUMN verify_status TEXT")
 
 
+def _migrate_3_process_identity(conn: sqlite3.Connection) -> None:
+    """v2 → v3: add processes.create_time so reconcile can tell a recorded pid from
+    a stranger that later inherited its recycled number (idempotent)."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(processes)")}
+    if "create_time" not in columns:
+        conn.execute("ALTER TABLE processes ADD COLUMN create_time REAL")
+
+
 # version -> upgrade step. Applied in order for any DB below SCHEMA_VERSION, so a
 # Binky upgrade never strands an existing registry. Steps must be idempotent.
-_MIGRATIONS = {2: _migrate_2_verify_status}
+_MIGRATIONS = {2: _migrate_2_verify_status, 3: _migrate_3_process_identity}
 
 
 class WorktreeStatus(StrEnum):
@@ -118,7 +126,8 @@ CREATE TABLE IF NOT EXISTS slices (
 CREATE TABLE IF NOT EXISTS processes (
     id          INTEGER PRIMARY KEY,
     worktree_id INTEGER NOT NULL REFERENCES worktrees(id) ON DELETE CASCADE,
-    pid         INTEGER NOT NULL
+    pid         INTEGER NOT NULL,
+    create_time REAL
 );
 """
 
@@ -343,9 +352,14 @@ class Registry:
         self._conn.execute("DELETE FROM slices WHERE id=?", (slice_id,))
 
     # -- processes (PIDs, for reconcile after a daemon restart) ------------ #
-    def add_process(self, worktree_id: int, pid: int) -> None:
+    def add_process(self, worktree_id: int, pid: int, create_time: float | None = None) -> None:
+        # capture the pid's birth time now, while we still know it is *this* process;
+        # after a restart it is what lets reconcile avoid killing a recycled pid.
+        if create_time is None:
+            create_time = procs.process_create_time(pid)
         self._conn.execute(
-            "INSERT INTO processes (worktree_id, pid) VALUES (?, ?)", (worktree_id, pid)
+            "INSERT INTO processes (worktree_id, pid, create_time) VALUES (?, ?, ?)",
+            (worktree_id, pid, create_time),
         )
 
     def processes_for(self, worktree_id: int) -> list[int]:
@@ -353,6 +367,13 @@ class Registry:
             "SELECT pid FROM processes WHERE worktree_id=?", (worktree_id,)
         ).fetchall()
         return [r["pid"] for r in rows]
+
+    def process_identities(self, worktree_id: int) -> list[tuple[int, float | None]]:
+        """``(pid, create_time)`` pairs — the identity reconcile checks before a kill."""
+        rows = self._conn.execute(
+            "SELECT pid, create_time FROM processes WHERE worktree_id=?", (worktree_id,)
+        ).fetchall()
+        return [(r["pid"], r["create_time"]) for r in rows]
 
     def clear_processes(self, worktree_id: int) -> None:
         self._conn.execute("DELETE FROM processes WHERE worktree_id=?", (worktree_id,))

@@ -19,7 +19,7 @@ def test_wal_and_schema_version(reg: Registry) -> None:
     mode = reg._conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode == "wal"
     ver = reg._conn.execute("PRAGMA user_version").fetchone()[0]
-    assert ver == 2
+    assert ver == 3
 
 
 def test_create_and_get_worktree(reg: Registry) -> None:
@@ -140,7 +140,7 @@ def test_default_db_path_respects_binky_home(tmp_path: Path, monkeypatch) -> Non
 def test_fresh_db_is_at_current_schema(tmp_path: Path) -> None:
     reg = Registry.connect(tmp_path / "binky.db")
     version = reg._conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 2
+    assert version == 3
     reg.close()
 
 
@@ -159,5 +159,26 @@ def test_migrates_legacy_v1_database(tmp_path: Path) -> None:
     reg = Registry.connect(db)
     columns = {row[1] for row in reg._conn.execute("PRAGMA table_info(worktrees)")}
     assert "verify_status" in columns  # migration added it
-    assert reg._conn.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert reg._conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    reg.close()
+
+
+def test_migrates_legacy_v2_database(tmp_path: Path) -> None:
+    """A v2 registry (processes without create_time) gains the identity column in place."""
+    db = tmp_path / "binky.db"
+    legacy = sqlite3.connect(db)
+    legacy.executescript(
+        "CREATE TABLE worktrees (id INTEGER PRIMARY KEY, project TEXT, name TEXT, path TEXT,"
+        " branch TEXT, status TEXT, created_at INTEGER, updated_at INTEGER, verify_status TEXT,"
+        " UNIQUE(project, name));"
+        "CREATE TABLE processes (id INTEGER PRIMARY KEY, worktree_id INTEGER, pid INTEGER);"
+    )
+    legacy.execute("PRAGMA user_version=2")
+    legacy.commit()
+    legacy.close()
+
+    reg = Registry.connect(db)
+    columns = {row[1] for row in reg._conn.execute("PRAGMA table_info(processes)")}
+    assert "create_time" in columns  # migration added it
+    assert reg._conn.execute("PRAGMA user_version").fetchone()[0] == 3
     reg.close()
