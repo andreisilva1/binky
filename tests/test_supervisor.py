@@ -94,6 +94,16 @@ def test_gives_up_after_cap(tmp_path: Path) -> None:
     assert not report.restarted
 
 
+def test_service_alive_is_scoped_to_one_service(tmp_path: Path) -> None:
+    pm = ProcessManager()
+    _start(pm, tmp_path, _script(tmp_path, "sleep.py", "import time; time.sleep(30)"))
+    assert pm.service_alive(1, "svc") is True
+    assert pm.service_alive(1, "other") is False  # a different service name
+    assert pm.service_alive(2, "svc") is False  # a different worktree
+    pm.stop(1)
+    assert pm.service_alive(1, "svc") is False  # gone once stopped
+
+
 def test_worktree_health_reflects_probe(tmp_path: Path) -> None:
     sleeper = _script(tmp_path, "sleep.py", "import time; time.sleep(30)")
 

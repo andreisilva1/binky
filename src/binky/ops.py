@@ -13,6 +13,7 @@ import re
 import shutil
 import subprocess
 import threading
+from functools import partial
 from pathlib import Path
 
 from binky import adapters, allocator, git, health, observability, paths, resolve
@@ -475,8 +476,13 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             )
             reg.add_process(wt.id, pid)
             timeout = health.timeout_for(svc)
-            if not health.wait_healthy(sname, svc, ports, name, cwd, timeout):
-                raise RpcFault("unhealthy", f"'{sname}' did not become healthy within {timeout:g}s")
+            alive = partial(procman.service_alive, wt.id, sname)
+            if not health.wait_healthy(sname, svc, ports, name, cwd, timeout, alive):
+                if alive():
+                    raise RpcFault(
+                        "unhealthy", f"'{sname}' did not become healthy within {timeout:g}s"
+                    )
+                raise RpcFault("unhealthy", f"'{sname}' exited before it became healthy")
             started.append(
                 {"service": sname, "pid": pid, "port": resolve.primary_port(ports, sname)}
             )

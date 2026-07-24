@@ -19,6 +19,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 
 from binky import resolve
 from binky.config import Service
@@ -104,11 +105,21 @@ def wait_healthy(
     worktree: str,
     cwd: str,
     timeout: float,
+    alive: Callable[[], bool] | None = None,
 ) -> bool:
+    """Poll until *service* is healthy or *timeout* elapses.
+
+    ``alive``, when given, reports whether the service's process is still running.
+    A process that has already exited will never pass its check, so we stop the
+    moment it dies instead of polling a corpse for the full timeout — turning a
+    30s wait on a crash-on-boot service into an immediate, honest failure.
+    """
     deadline = time.monotonic() + timeout
     while True:
         if check_once(service, svc, ports, worktree, cwd):
             return True
+        if alive is not None and not alive():
+            return False
         if time.monotonic() >= deadline:
             return False
         time.sleep(0.2)

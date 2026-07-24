@@ -184,6 +184,13 @@ class ProcessManager:
     def pids(self, worktree_id: int) -> list[int]:
         return [m.proc.pid for m in self._entries(worktree_id) if m.proc.poll() is None]
 
+    def service_alive(self, worktree_id: int, service: str) -> bool:
+        """True if *service* has a live process — lets a startup wait notice a crash."""
+        return any(
+            m.service == service and m.proc.poll() is None
+            for m in self._entries(worktree_id)
+        )
+
     def worktree_health(self, worktree_id: int) -> str | None:
         """'healthy'/'unhealthy' across the health-tracked services, or None if none."""
         tracked = [m for m in self._entries(worktree_id) if m.health_check is not None]
