@@ -3,10 +3,14 @@ worktrees that have gone fully down. `tick(now)` takes the clock as an argument,
 so these drive time by hand and stay deterministic (no real sleeping/backoff waits).
 """
 
+import builtins
 import sys
 import time
 from pathlib import Path
 
+import pytest
+
+from binky import supervisor
 from binky.supervisor import _GIVE_UP_AFTER, ProcessManager
 
 
@@ -92,6 +96,30 @@ def test_gives_up_after_cap(tmp_path: Path) -> None:
     report = pm.tick(now)  # cap reached → stop trying, reclaim
     assert 1 in report.worktrees_down
     assert not report.restarted
+
+
+def test_spawn_closes_the_log_when_popen_fails(tmp_path: Path, monkeypatch) -> None:
+    """If Popen raises, the log handle _spawn opened must not leak — nobody else
+    will ever be handed it to close."""
+    opened: list = []
+    real_open = builtins.open
+
+    def tracking_open(*args, **kwargs):
+        handle = real_open(*args, **kwargs)
+        opened.append(handle)
+        return handle
+
+    def failing_popen(*_args, **_kwargs):
+        raise OSError("exec failed")
+
+    monkeypatch.setattr(builtins, "open", tracking_open)
+    monkeypatch.setattr(supervisor.subprocess, "Popen", failing_popen)
+
+    with pytest.raises(OSError, match="exec failed"):
+        supervisor._spawn("cmd", str(tmp_path), {}, tmp_path / "svc.log", None)
+
+    assert opened, "expected _spawn to open a log handle"
+    assert all(handle.closed for handle in opened)  # ...and to close it on the failure
 
 
 def test_service_alive_is_scoped_to_one_service(tmp_path: Path) -> None:

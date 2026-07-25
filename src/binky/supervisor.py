@@ -74,15 +74,21 @@ def _spawn(
     """Launch one service process, returning it and its (open) log handle."""
     log_file.parent.mkdir(parents=True, exist_ok=True)
     handle = open(log_file, "ab")  # noqa: SIM115 — closed in stop()/on restart
-    proc = subprocess.Popen(
-        _wrap_limits(command, limits),
-        cwd=cwd,
-        env={**os.environ, **env},
-        shell=True,
-        stdout=handle,
-        stderr=subprocess.STDOUT,
-        **_new_group_kwargs(),
-    )
+    try:
+        proc = subprocess.Popen(
+            _wrap_limits(command, limits),
+            cwd=cwd,
+            env={**os.environ, **env},
+            shell=True,
+            stdout=handle,
+            stderr=subprocess.STDOUT,
+            **_new_group_kwargs(),
+        )
+    except BaseException:
+        # Popen failed (bad cwd, exec error, ...): nobody will ever be returned this
+        # handle to close it, so close it here before letting the error propagate.
+        handle.close()
+        raise
     return proc, handle
 
 
