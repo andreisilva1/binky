@@ -1,12 +1,16 @@
 """Integration tests for the daemon lifecycle (spawns a real detached process)."""
 
+import asyncio
 import contextlib
 import os
 import stat
+import threading
 
 import pytest
 
 from binky import daemon, ipc, paths
+from binky.registry import WorktreeStatus
+from binky.supervisor import TickReport
 
 unix_only = pytest.mark.skipif(os.name == "nt", reason="Windows uses a loopback TCP port")
 
@@ -131,6 +135,45 @@ def test_clear_daemon_info_spares_another_daemons_endpoint() -> None:
     paths.daemon_info_path().write_text("{not json", encoding="utf-8")
     ipc.clear_daemon_info()
     assert not paths.daemon_info_path().exists()  # unreadable is a leftover either way
+
+
+def test_apply_report_keeps_registry_io_off_the_event_loop() -> None:
+    """A supervision tick's registry writes are blocking SQLite that can wait out the
+    busy-timeout; if they ran on the loop they'd freeze the proxy and RPC. They must
+    run off it, while the admission/route bookkeeping stays on the loop — and the
+    worktree still ends up marked down with its slot released."""
+    d = daemon.Daemon()
+    try:
+        wt = d.registry.create_worktree(
+            "proj", "alpha", "/tmp/x", "alpha", status=WorktreeStatus.ready
+        )
+        # mirror a live `up`: the worktree holds an admission slot and a proxy route
+        d._slots[("proj", "alpha")] = 1
+        d._routes_by_wt[("proj", "alpha")] = {"alpha.proj.test": 4000}
+
+        seen: dict[str, threading.Thread] = {}
+        real_set = d.registry.set_worktree_status
+
+        def recording_set(worktree_id, status):
+            seen["thread"] = threading.current_thread()
+            return real_set(worktree_id, status)
+
+        d.registry.set_worktree_status = recording_set  # type: ignore[method-assign]
+        report = TickReport(worktrees_down=[wt.id])
+
+        async def run():
+            loop_thread = threading.current_thread()
+            await d._apply_report(report)
+            return loop_thread
+
+        loop_thread = asyncio.run(run())
+
+        assert seen["thread"] is not loop_thread  # the write ran off the event loop
+        assert d.registry.get_worktree_by_id(wt.id).status == "stopped"  # ...and still applied
+        assert ("proj", "alpha") not in d._slots  # slot freed on the loop
+        assert d.routes == {}  # route dropped on the loop
+    finally:
+        d.registry.close()
 
 
 def test_bad_token_rejected() -> None:

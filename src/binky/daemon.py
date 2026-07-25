@@ -147,26 +147,42 @@ class Daemon:
             while not self._stop.is_set():
                 await asyncio.sleep(SUPERVISE_INTERVAL)
                 report = await asyncio.to_thread(self.procman.tick, time.monotonic())
-                self._apply_report(report)
+                await self._apply_report(report)
 
-    def _apply_report(self, report: TickReport) -> None:
-        """Sync a supervision tick to the registry + admission/routes (on the loop)."""
+    async def _apply_report(self, report: TickReport) -> None:
+        """Sync a supervision tick to the registry + admission/routes.
+
+        The registry writes are blocking SQLite and can stall on the busy-timeout
+        (up to 5s while a worker thread holds the write lock), so — like every other
+        registry op the daemon does — they run off the event loop; a supervision tick
+        must never freeze the proxy and RPC. Only the admission/route bookkeeping,
+        which touches asyncio primitives, stays on the loop.
+        """
+        downed = await asyncio.to_thread(self._sync_registry, report)
+        for wt_id, service in report.restarted:
+            observability.log_event("restart", worktree_id=wt_id, service=service)
+        for wt in downed:  # free the RAM slot + drop proxy routes
+            self._release_slot(wt.project, wt.name)
+            observability.log_event("gc", project=wt.project, worktree=wt.name)
+
+    def _sync_registry(self, report: TickReport) -> list:
+        """Off-loop: apply pid changes and mark down worktrees stopped. Returns the
+        downed worktree rows so the caller can free their slots without a second read."""
         for wt_id, pids in report.changed_pids.items():
             with contextlib.suppress(Exception):
                 self.registry.clear_processes(wt_id)
                 for pid in pids:
                     self.registry.add_process(wt_id, pid)
-        for wt_id, service in report.restarted:
-            observability.log_event("restart", worktree_id=wt_id, service=service)
+        downed = []
         for wt_id in report.worktrees_down:
             wt = None
             with contextlib.suppress(Exception):
                 wt = self.registry.get_worktree_by_id(wt_id)
                 self.registry.clear_processes(wt_id)
                 self.registry.set_worktree_status(wt_id, WorktreeStatus.stopped)
-            if wt is not None:  # free the RAM slot + drop proxy routes
-                self._release_slot(wt.project, wt.name)
-                observability.log_event("gc", project=wt.project, worktree=wt.name)
+            if wt is not None:
+                downed.append(wt)
+        return downed
 
     async def _status(self, params: dict) -> dict:
         # read-only and thread-safe (connection-per-thread registry); no lock needed
