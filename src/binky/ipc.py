@@ -97,7 +97,11 @@ def _recv_line(sock: socket.socket) -> dict:
         buf += chunk
     if not buf:
         raise RpcError("connection", "daemon closed the connection without responding")
-    return json.loads(buf.decode())
+    try:
+        return json.loads(buf.decode())
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        # a truncated or garbled line — the daemon spoke, but not something we can trust
+        raise RpcError("malformed", "daemon returned an unreadable response") from exc
 
 
 def call(method: str, params: dict | None = None, *, timeout: float = 5.0) -> dict:
@@ -116,6 +120,12 @@ def call(method: str, params: dict | None = None, *, timeout: float = 5.0) -> di
         request = {"token": info.token, "method": method, "params": params or {}}
         sock.sendall((json.dumps(request) + "\n").encode())
         resp = _recv_line(sock)
+    except OSError as exc:
+        # a timeout or reset *after* connecting (the daemon died or stopped answering
+        # mid-call) is still "unreachable" — surface it as such, per this function's
+        # contract, instead of leaking a raw OSError past callers that only guard
+        # against DaemonNotRunning / RpcError.
+        raise DaemonNotRunning(str(exc)) from exc
     finally:
         sock.close()
     if not resp.get("ok"):
