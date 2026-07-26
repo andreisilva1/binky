@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an improvement or a new adapter
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Binky makes hard or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like Binky to do? For a new adapter, name the server and how a "slice" would be carved.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Anything you've tried or considered instead.
+    validations:
+      required: false
