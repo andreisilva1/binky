@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Binky — one isolated world per git worktree</title>
 <meta name="description" content="Binky gives every git worktree its own ports, env, database and URLs, so a swarm of coding agents runs in parallel on one machine without collisions." />
-<meta name="color-scheme" content="light" />
+<meta name="color-scheme" content="dark" />
 <link rel="stylesheet" href="styles.css" />
 <link rel="icon" href="binky.svg" type="image/svg+xml" />
 </head>
@@ -39,9 +39,24 @@
     <div class="hero-grid" aria-hidden="true"></div>
 
     <div class="container hero-inner">
-      <span class="rabbit-lg rise d1" aria-hidden="true"></span>
+      <svg class="hero-mark rise d1" viewBox="0 0 64 64" aria-hidden="true">
+        <g fill-rule="evenodd">
+          <g transform="translate(18 3) rotate(-10 6 32)">
+            <path d="M6,0 a6,6 0 0,1 6,6 L12,26 a6,6 0 0,1 -12,0 L0,6 a6,6 0 0,1 6,-6 Z
+                     M6,6.5 a2.5,2.5 0 0,1 2.5,2.5 L8.5,23.5 a2.5,2.5 0 0,1 -5,0 L3.5,9 a2.5,2.5 0 0,1 2.5,-2.5 Z" />
+          </g>
+          <g transform="translate(34 3) rotate(10 6 32)">
+            <path d="M6,0 a6,6 0 0,1 6,6 L12,26 a6,6 0 0,1 -12,0 L0,6 a6,6 0 0,1 6,-6 Z
+                     M6,6.5 a2.5,2.5 0 0,1 2.5,2.5 L8.5,23.5 a2.5,2.5 0 0,1 -5,0 L3.5,9 a2.5,2.5 0 0,1 2.5,-2.5 Z" />
+          </g>
+          <path d="M15,41 a17,17 0 1,0 34,0 a17,17 0 1,0 -34,0 Z
+                   M22.4,41 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z
+                   M36.4,41 a2.6,2.6 0 1,0 5.2,0 a2.6,2.6 0 1,0 -5.2,0 Z
+                   M32,50.5 L28.6,46.2 L35.4,46.2 Z" />
+        </g>
+      </svg>
 
-      <div class="eyebrow rise d2">MIT · Python 3.11+ · macOS · Linux · Windows</div>
+      <div class="eyebrow rise d2">Apache-2.0 · Python 3.11+ · macOS · Linux · Windows</div>
 
       <h1 class="rise d2">One isolated world <span class="dim">per worktree.</span></h1>
 
@@ -265,7 +280,7 @@
   <div class="container foot-inner">
     <a class="foot-brand" href="#top">
       <span class="rabbit" aria-hidden="true"></span>
-      <span>binky <span class="gloss">(n.) the mid-air twist a rabbit does when it has room to run</span> — MIT licensed</span>
+      <span>binky <span class="gloss">(n.) the mid-air twist a rabbit does when it has room to run</span> — Apache-2.0 licensed</span>
     </a>
     <nav class="foot-links">
       <a href="./docs.html">Docs</a>

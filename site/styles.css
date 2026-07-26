@@ -1,21 +1,21 @@
-/* Binky — landing styles. Warm paper, dry, editorial. No frameworks, no external assets. */
+/* Binky — landing styles. Deep indigo dark, dry, editorial. No frameworks, no external assets. */
 
 :root {
-  --bg: #faf6f0;             /* cream paper */
-  --bg-soft: #f3ede4;
-  --surface: #ffffff;
-  --surface-2: #f7f2ea;
-  --ink: 30, 27, 54;         /* the indigo, as channels — every wash below is built from it */
-  --border: rgba(30, 27, 54, 0.10);
-  --border-strong: rgba(30, 27, 54, 0.20);
-  --fg: #1e1b36;             /* deep indigo */
-  --fg-dim: #4a4462;
-  --muted: #6b6580;
-  --faint: #8b85a0;          /* decorative only — 3.3:1 on cream, never body text */
-  --accent: #f2683c;         /* coral — used sparingly */
-  --accent-soft: rgba(242, 104, 60, 0.12);
-  --green: #2e9e6b;
-  --shadow: 0 1px 2px rgba(30, 27, 54, 0.04), 0 8px 24px rgba(30, 27, 54, 0.05);
+  --bg: #0c0a15;             /* near-black indigo — the brand ink pushed to the floor */
+  --bg-soft: #100d1c;
+  --surface: #16122a;        /* a lifted indigo panel */
+  --surface-2: #1d1838;
+  --ink: 232, 228, 248;      /* light channels — every wash below is built from it */
+  --border: rgba(232, 228, 248, 0.10);
+  --border-strong: rgba(232, 228, 248, 0.22);
+  --fg: #ece9f7;             /* soft indigo-white */
+  --fg-dim: #b7b1d3;
+  --muted: #867fa6;
+  --faint: #6d6798;          /* decorative + the dimmed half of the headline — never body text */
+  --accent: #ff7a4d;         /* coral — a shade hotter so it sings on dark */
+  --accent-soft: rgba(255, 122, 77, 0.14);
+  --green: #34d399;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.5), 0 16px 44px rgba(0, 0, 0, 0.55);
   --radius: 12px;
   --radius-lg: 16px;
   --maxw: 1080px;
@@ -31,6 +31,11 @@ html { scroll-behavior: smooth; }
 body {
   margin: 0;
   background: var(--bg);
+  /* a warm coral glow bleeding from the top edge — the one thing that keeps this
+     from being just another inverted-to-black page */
+  background-image: radial-gradient(ellipse 92% 55% at 50% -8%, rgba(255, 122, 77, 0.07), transparent 60%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
   color: var(--fg);
   font-family: var(--font);
   font-size: 16px;
@@ -60,8 +65,7 @@ a { color: inherit; text-decoration: none; }
    alpha, which is exactly that: the geometry lives in one place, the colour
    stays with whoever is using it. The coral baked into the file is for the two
    places that consume it directly, the favicon and the README. */
-.rabbit,
-.rabbit-lg {
+.rabbit {
   display: inline-block;
   flex: none;
   background-color: currentColor;
@@ -107,23 +111,23 @@ a { color: inherit; text-decoration: none; }
   border-bottom: 1px solid var(--border);
 }
 .bg-motion { position: absolute; inset: -20% -10% 0; z-index: 0; pointer-events: none; overflow: hidden; }
-/* On a light background these have to be far weaker than they were on black —
-   the same opacity that read as a glow over #0b0b0c reads as a stain over cream. */
+/* Back over near-black, these read as glow rather than stain — so they carry the
+   strength they were originally built for, not the muted values cream demanded. */
 .blob {
   position: absolute;
   border-radius: 50%;
   filter: blur(100px);
-  opacity: 0.75;
+  opacity: 0.9;
   will-change: transform;
 }
-.blob.b1 { width: 520px; height: 520px; left: -6%; top: -14%;
-  background: radial-gradient(circle, rgba(242,104,60,0.20), transparent 68%);
+.blob.b1 { width: 540px; height: 540px; left: -6%; top: -14%;
+  background: radial-gradient(circle, rgba(255,122,77,0.34), transparent 68%);
   animation: drift1 34s ease-in-out infinite; }
-.blob.b2 { width: 460px; height: 460px; right: -4%; top: 2%;
-  background: radial-gradient(circle, rgba(46,158,107,0.14), transparent 68%);
+.blob.b2 { width: 470px; height: 470px; right: -4%; top: 2%;
+  background: radial-gradient(circle, rgba(52,211,153,0.20), transparent 68%);
   animation: drift2 42s ease-in-out infinite; }
-.blob.b3 { width: 600px; height: 600px; left: 34%; top: 22%;
-  background: radial-gradient(circle, rgba(120,110,220,0.14), transparent 70%);
+.blob.b3 { width: 620px; height: 620px; left: 34%; top: 22%;
+  background: radial-gradient(circle, rgba(139,124,255,0.24), transparent 70%);
   animation: drift3 50s ease-in-out infinite; }
 .hero-grid {
   position: absolute; inset: 0; z-index: 0; pointer-events: none;
@@ -134,7 +138,19 @@ a { color: inherit; text-decoration: none; }
   opacity: 0.35;
 }
 .hero-inner { position: relative; z-index: 1; text-align: center; }
-.hero .rabbit-lg { width: 76px; height: 76px; color: var(--accent); margin: 0 auto 26px; display: block; }
+/* The hero mark is inline SVG, not the masked silhouette used elsewhere. It's
+   filled and stroke-less: with no stroke, the overlapping ear and head paths
+   simply union at the same colour, so nothing crosses the face. Translucency is
+   applied at the element level (`opacity`), not per-fill — that flattens the
+   shape first, so the ear/head overlap doesn't double up into a visible seam.
+   The evenodd counters (ear insides, eyes, nose) stay hollow. */
+.hero-mark {
+  width: 86px; height: 86px; display: block; margin: 0 auto 26px;
+  fill: var(--accent);
+  stroke: none;
+  opacity: 0.9;
+  mix-blend-mode: overlay;           /* Photoshop's "Sobrepor" — blends with the hero backdrop */
+}
 .eyebrow {
   display: inline-block;
   font-family: var(--mono);
@@ -238,8 +254,10 @@ code { font-family: var(--mono); font-size: 13px; line-height: 1.8; color: var(-
   transition: border-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
 }
 .feat:hover {
-  border-color: var(--border-strong); transform: translateY(-2px);
-  box-shadow: 0 2px 4px rgba(var(--ink), 0.05), 0 14px 34px rgba(var(--ink), 0.09);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border-strong));
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4), 0 16px 40px rgba(0, 0, 0, 0.5),
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent);
 }
 .feat h3 { font-size: 1.02rem; font-weight: 600; margin: 0 0 8px; letter-spacing: -0.01em; }
 .feat p { margin: 0; color: var(--muted); font-size: 0.94rem; line-height: 1.55; }
@@ -317,7 +335,7 @@ footer { padding: 56px 0; border-bottom: none; }
 .docs-body h3 { font-size: 1.05rem; font-weight: 600; letter-spacing: -0.015em; margin: 34px 0 10px; scroll-margin-top: 84px; }
 .docs-body p { color: var(--fg-dim); margin: 0 0 16px; }
 .docs-body strong { color: var(--fg); font-weight: 600; }
-.docs-body a:not(.btn) { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: rgba(242,104,60,0.4); }
+.docs-body a:not(.btn) { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); }
 .docs-body a:not(.btn):hover { text-decoration-color: var(--accent); }
 .docs-body ul { color: var(--fg-dim); margin: 0 0 16px; padding-left: 20px; }
 .docs-body li { margin-bottom: 7px; }

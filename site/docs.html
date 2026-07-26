@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Docs — Binky</title>
 <meta name="description" content="Binky documentation: install, binky.toml, ports and URLs, adapters and golden templates, the CLI, the MCP server, and troubleshooting." />
-<meta name="color-scheme" content="light" />
+<meta name="color-scheme" content="dark" />
 <link rel="stylesheet" href="styles.css" />
 <link rel="icon" href="binky.svg" type="image/svg+xml" />
 </head>
@@ -496,8 +496,12 @@
           agent that can call tools doesn't need to shell out or parse output.
         </p>
         <p>
-          It installs like any other stdio MCP server — a command and its arguments, identical in
-          every client that speaks the protocol. Only where the block lives changes:
+          In Claude Code, one line wires it up:
+        </p>
+<pre><code><span class="tok-cmd">claude mcp add</span> binky -- binky mcp</code></pre>
+        <p>
+          Any other client that speaks the protocol takes the same stdio server as a config block —
+          identical everywhere, only where the block lives changes:
         </p>
 <pre><code>{
   <span class="tok-key">"mcpServers"</span>: {
@@ -507,9 +511,9 @@
 </code></pre>
         <p>
           To run it with nothing installed at all, hand the job to <code>uvx</code> instead —
-          <code>"command": "uvx"</code>, <code>"args": ["--from", "binky[all-adapters]", "binky",
-          "mcp"]</code>. Clients with a CLI usually take the same thing inline, e.g.
-          <code>claude mcp add binky -- binky mcp</code>.
+          <code>claude mcp add binky -- uvx --from "binky[all-adapters]" binky mcp</code>, or as a
+          block, <code>"command": "uvx"</code>, <code>"args": ["--from", "binky[all-adapters]",
+          "binky", "mcp"]</code>.
         </p>
         <div class="callout">
           <span class="k">One daemon, either way</span>
@@ -679,7 +683,7 @@
   <div class="container foot-inner">
     <a class="foot-brand" href="./index.html">
       <span class="rabbit" aria-hidden="true"></span>
-      <span>binky — MIT licensed</span>
+      <span>binky — Apache-2.0 licensed</span>
     </a>
     <nav class="foot-links">
       <a href="./docs.html">Docs</a>

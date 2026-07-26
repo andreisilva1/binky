@@ -257,16 +257,24 @@ dependency-free one in 30 lines.
 ## For agents
 
 `binky mcp` speaks MCP over stdio, exposing `up`, `down`, `status`, `env` and `verify` — the same
-verbs the CLI calls, against the same daemon. It's a plain stdio server — the same block in every
-client that speaks the protocol, only in a different file:
+verbs the CLI calls, against the same daemon.
+
+In Claude Code, one line wires it up:
+
+```bash
+claude mcp add binky -- binky mcp
+```
+
+Any other client that speaks the protocol takes the same stdio server as a config block — the same
+one everywhere, only the file differs:
 
 ```json
 { "mcpServers": { "binky": { "command": "binky", "args": ["mcp"] } } }
 ```
 
-To run it with nothing installed, hand it to `uvx` instead: `"command": "uvx"`, `"args":
-["--from", "binky[all-adapters]", "binky", "mcp"]`. Clients with a CLI take the same thing
-inline (`claude mcp add binky -- binky mcp`).
+To run it with nothing installed, hand it to `uvx` instead — `claude mcp add binky -- uvx --from
+"binky[all-adapters]" binky mcp`, or as a block, `"command": "uvx"`, `"args": ["--from",
+"binky[all-adapters]", "binky", "mcp"]`.
 
 ## How it works
 
