@@ -1,0 +1,50 @@
+name: Bug report
+description: Something in Binky isn't working
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. `binky doctor` output below tells us the most, fastest.
+        Please don't paste secrets (an `admin_url` with a real password, tokens).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+      placeholder: I ran `binky up login-fix` and…
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The commands you ran, and the relevant part of your `binky.toml` (redact credentials).
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`binky doctor` output"
+      description: Run `binky doctor` and paste the output.
+      render: shell
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Binky version
+      description: Output of `binky --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Linux
+        - macOS
+        - Windows
+    validations:
+      required: true

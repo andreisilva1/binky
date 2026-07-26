@@ -1,0 +1,45 @@
+name: Release
+
+# Tag-triggered, maintainer-approved publish to PyPI via Trusted Publishing (OIDC):
+# no long-lived API token lives anywhere. Push a tag `vX.Y.Z` after bumping
+# __version__ and updating CHANGELOG.md.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Build and publish to PyPI
+    runs-on: ubuntu-latest
+    # Configure this environment in repo settings with a required reviewer so a
+    # publish cannot fire without a human approving it.
+    environment: release
+    permissions:
+      id-token: write # PyPI Trusted Publishing (OIDC) — mints a short-lived credential
+      contents: write # create the GitHub Release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+
+      # Publishes everything in dist/ and generates PEP 740 attestations automatically.
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@ba38be9e461d3875417946c167d0b5f3d385a247 # release/v1
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.whl dist/*.tar.gz \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "See [CHANGELOG.md](CHANGELOG.md) for details."
