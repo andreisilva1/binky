@@ -7,7 +7,27 @@ user**. Under that model it is as safe as the build tools you already run daily 
 compose`) — and the notes below hold. Binky does **not** currently target hostile multi-user machines; that
 isolation is tracked separately and is out of scope for a single-user setup.
 
-If you find a vulnerability, please open a private report rather than a public issue.
+If you find a vulnerability, please report it privately — see below.
+
+## Reporting a vulnerability
+
+Please **do not** open a public issue for a security problem. Report it through GitHub's
+private vulnerability reporting:
+
+- Go to the repository's **Security → Report a vulnerability**
+  ([direct link](https://github.com/andreisilva1/binky/security/advisories/new)), or
+- if you can't use GitHub, email **andrei.fbds@gmail.com**.
+
+Please include what you did, what happened, and — if you can — a minimal reproduction.
+Don't include real credentials in the report.
+
+Binky is maintained by one person; expect an acknowledgement **within 5 business days**.
+Once a fix is available, the report is disclosed through a GitHub Security Advisory.
+
+## Supported versions
+
+While Binky is in `0.x`, only the **latest release** and the current `main` receive
+security fixes.
 
 ## What to know
 
