@@ -11,7 +11,7 @@ So a swarm of coding agents runs in parallel on one machine without anything col
 [![CI](https://github.com/andreisilva1/binky/actions/workflows/ci.yml/badge.svg)](https://github.com/andreisilva1/binky/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/binky.svg)](https://pypi.org/project/binky/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
 [Quickstart](#quickstart) · [Adapters](#adapters) · [Commands](#commands) · [For agents](#for-agents) · [How it works](#how-it-works) · [Troubleshooting](TROUBLESHOOTING.md)
 
@@ -323,6 +323,11 @@ Adapter integration tests skip unless you point them at a real server —
 `BINKY_TEST_RABBITMQ`, `BINKY_TEST_KAFKA`, `BINKY_TEST_QDRANT`, `BINKY_TEST_CLICKHOUSE`,
 `BINKY_TEST_ELASTICSEARCH`. CI provides all of them.
 
+## Contributing
+
+Bug reports, new adapters, and PRs are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) to
+get set up, and [ARCHITECTURE.md](ARCHITECTURE.md) for a map of the internals.
+
 ## License
 
-MIT — see [LICENSE](LICENSE).
+Apache-2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE).

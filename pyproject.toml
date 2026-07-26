@@ -7,8 +7,8 @@ name = "binky"
 description = "Give every git worktree its own isolated local world — ports, env, database, URLs — so a swarm of agents runs in parallel without collisions."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
-license-files = ["LICENSE"]
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Andrei Silva" }]
 keywords = ["worktree", "dev-environment", "agents", "isolation", "ports", "parallel"]
 classifiers = [
