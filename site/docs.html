@@ -109,13 +109,13 @@
           commented with a TODO instead of guessing.
         </p>
         <p>Then bring worktrees up, as many as you like, at the same time:</p>
-<pre><code><span class="tok-cmd">binky up</span> login-fix
-<span class="tok-cmd">binky up</span> checkout-v2
+<pre><code><span class="tok-cmd">binky up</span> &lt;your-branch-name&gt;
+<span class="tok-cmd">binky up</span> &lt;another-branch-name&gt;
 
 <span class="tok-cmd">binky status</span>            <span class="tok-cmt"># every worktree on the machine, grouped by project</span>
-<span class="tok-cmd">binky env</span> login-fix     <span class="tok-cmt"># its live coordinates, for you or an agent</span>
-<span class="tok-cmd">binky down</span> login-fix    <span class="tok-cmt"># pause: keeps files and ports; `up` again is instant</span>
-<span class="tok-cmd">binky remove</span> login-fix  <span class="tok-cmt"># destroy it (refuses if there are uncommitted changes)</span>
+<span class="tok-cmd">binky env</span> &lt;your-branch-name&gt;     <span class="tok-cmt"># its live coordinates, for you or an agent</span>
+<span class="tok-cmd">binky down</span> &lt;your-branch-name&gt;    <span class="tok-cmt"># pause: keeps files and ports; `up` again is instant</span>
+<span class="tok-cmd">binky remove</span> &lt;your-branch-name&gt;  <span class="tok-cmt"># destroy it (refuses if there are uncommitted changes)</span>
 </code></pre>
         <p>
           Each <code>up</code> creates or reuses a git worktree for that branch, allocates a port
@@ -380,13 +380,13 @@
           <code>http://localhost:&lt;port&gt;</code>. That curated set is what
           <code>binky env</code> prints, and nothing else leaks:
         </p>
-<pre><code><span class="tok-cmd">binky env</span> login-fix
-<span class="tok-out">{"web": "http://web.login-fix.acme.localhost",
+<pre><code><span class="tok-cmd">binky env</span> &lt;your-branch-name&gt;
+<span class="tok-out">{"web": "http://web.&lt;your-branch-name&gt;.acme.localhost",
  "api": "http://localhost:41003",
- "db":  "postgresql://…/acme_login_fix"}</span>
+ "db":  "postgresql://…/acme_&lt;your-branch-name&gt;"}</span>
 
 <span class="tok-cmt"># or straight into a shell</span>
-<span class="tok-cmd">eval</span> <span class="tok-str">"$(binky env login-fix --dotenv)"</span>
+<span class="tok-cmd">eval</span> <span class="tok-str">"$(binky env &lt;your-branch-name&gt; --dotenv)"</span>
 </code></pre>
         <p>
           <code>verify</code> is the gate. <code>binky verify &lt;worktree&gt;</code> runs each
@@ -472,11 +472,11 @@
           <code>binky-adapter-&lt;name&gt;</code> on <code>PATH</code> and driven over a one-shot
           subprocess + JSON protocol:
         </p>
-<pre><code><span class="tok-cmd">$ binky-adapter-filestore provision</span> <span class="tok-flag">&lt;&lt;&lt;</span> <span class="tok-str">'{"slice": "acme_login-fix", "config": {}}'</span>
+<pre><code><span class="tok-cmd">$ binky-adapter-filestore provision</span> <span class="tok-flag">&lt;&lt;&lt;</span> <span class="tok-str">'{"slice": "acme_&lt;your-branch-name&gt;", "config": {}}'</span>
 <span class="tok-out">{"ok": true}</span>
 
-<span class="tok-cmd">$ binky-adapter-filestore resolve</span>   <span class="tok-flag">&lt;&lt;&lt;</span> <span class="tok-str">'{"slice": "acme_login-fix", "config": {}}'</span>
-<span class="tok-out">{"ok": true, "address": "file:///tmp/binky-filestore/acme_login-fix"}</span>
+<span class="tok-cmd">$ binky-adapter-filestore resolve</span>   <span class="tok-flag">&lt;&lt;&lt;</span> <span class="tok-str">'{"slice": "acme_&lt;your-branch-name&gt;", "config": {}}'</span>
+<span class="tok-out">{"ok": true, "address": "file:///tmp/binky-filestore/acme_&lt;your-branch-name&gt;"}</span>
 </code></pre>
         <p>
           Python authors get the protocol for free: <code>binky.adapter_sdk.run()</code> bridges a
@@ -626,7 +626,7 @@
           under <code>[project]</code>.
         </p>
 
-        <h3><code>web.login-fix.acme.localhost</code> doesn't resolve</h3>
+        <h3><code>web.&lt;your-branch-name&gt;.acme.localhost</code> doesn't resolve</h3>
         <p>
           <code>*.localhost</code> resolves to loopback on macOS, most Linux setups and Windows 10+.
           If yours doesn't, add the specific name to your hosts file — or skip the proxy entirely
