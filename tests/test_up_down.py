@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from _demo_app import WEB_SERVER_PY
-from binky import daemon, ipc, paths
+from binky import daemon, ipc, paths, settings
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -22,7 +22,7 @@ def _git(cwd: Path, *args: str) -> None:
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("BINKY_PROXY_PORT", "0")  # no proxy unless a test opts in
+    settings.save(settings.Settings(proxy_port=0, https_port=0))  # no proxy unless a test opts in
     yield
     with contextlib.suppress(Exception):
         daemon.stop(timeout=5)
@@ -40,12 +40,11 @@ def _make_project(tmp_path: Path) -> Path:
     (proj / "binky.toml").write_text(
         '[project]\n'
         'name = "demo"\n'
-        # Pin the admission ceiling instead of inheriting the machine's. It defaults
-        # to max(2, min(RAM_GB // 2, cores)), which is 2 on a small CI runner — and a
-        # slot is held until `down`, so the third of three concurrent ups would queue
-        # until the RPC timed out. That is admission working; these tests are about
-        # ports and git, so they should not also be a test of how big the box is.
-        'max_parallel = 3\n'
+        # The admission ceiling is machine-global now (default_max_parallel from boot RAM;
+        # no per-project override). It is max(2, min(RAM_GB // 2, cores)) — 3+ on every
+        # current CI runner (Linux/Windows 4c, macOS 3c) — and a slot is held until `down`,
+        # so the three concurrent ups below are admitted together. On a 2-core box the third
+        # would queue; that box is out of scope for this ports-and-git test.
         '[services.sleeper]\n'
         f"cmd = '\"{py}\" sleeper.py'\n"
         '[services.web]\n'
@@ -102,6 +101,36 @@ def test_up_reuses_ports_after_down(tmp_path: Path) -> None:
     second = ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=60)
     web_port2 = next(s["port"] for s in second["services"] if s["service"] == "web")
     assert web_port2 == web_port  # ports are kept across down/up
+
+
+def test_up_refuses_a_reused_port_that_was_stolen(tmp_path: Path) -> None:
+    """C8: a port Binky reused was taken by an outside process while the worktree was down.
+    `up` must fail loud and name the port, not hand the service a port it can't bind and let
+    it crash-loop in silence. We don't auto-reallocate — the decision is to report, not paper
+    over."""
+    daemon.start(timeout=20)
+    proj = _make_project(tmp_path)
+
+    first = ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=60)
+    web_port = next(s["port"] for s in first["services"] if s["service"] == "web")
+    ipc.call("down", {"root": str(proj), "worktree": "feat"})
+
+    thief = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    thief.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    thief.bind(("127.0.0.1", web_port))  # a stranger grabs the port while feat is down
+    thief.listen(1)
+    try:
+        with pytest.raises(ipc.RpcError, match="took it") as excinfo:
+            ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=30)
+        assert excinfo.value.code == "port_taken"
+        assert str(web_port) in str(excinfo.value)  # the offending port is named
+    finally:
+        thief.close()
+
+    # transactional: the refused up left the worktree exactly as `down` did, not half-up
+    feat = next(w for w in ipc.call("status")["worktrees"] if w["worktree"] == "feat")
+    assert feat["running"] is False
+    assert feat["status"] == "stopped"
 
 
 def test_parallel_ups_distinct_worktrees(tmp_path: Path) -> None:
@@ -245,12 +274,13 @@ def test_logs_captured(tmp_path: Path) -> None:
     assert "hello from binky" in log.read_text(encoding="utf-8", errors="ignore")
 
 
-def test_proxy_routes_by_host(tmp_path: Path, monkeypatch) -> None:
+def test_proxy_routes_by_host(tmp_path: Path) -> None:
     probe = socket.socket()
     probe.bind(("127.0.0.1", 0))
     proxy_port = probe.getsockname()[1]
     probe.close()
-    monkeypatch.setenv("BINKY_PROXY_PORT", str(proxy_port))
+    # the daemon reads ports from the settings store at boot, so set it before start
+    settings.save(settings.Settings(proxy_port=proxy_port, https_port=0))
 
     daemon.start(timeout=20)
     proj = _make_project(tmp_path)

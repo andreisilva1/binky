@@ -44,6 +44,16 @@ def _host_free(port: int) -> bool:
         sock.close()
 
 
+def is_bound(port: int) -> bool:
+    """True if *port* is currently bound on the loopback host — someone is listening.
+
+    Used to re-validate a *reused* port at ``up`` time (C8): a port Binky recorded can be
+    grabbed by an outside process while the worktree is down, and reusing it blindly would
+    just crash-loop the service. Freshly allocated ports don't need this — allocation already
+    skips bound ports."""
+    return not _host_free(port)
+
+
 def allocate(
     reg: Registry,
     worktree_id: int,

@@ -5,9 +5,25 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import ClassVar
 
-from binky import ops, supervisor
+from binky import adapters, ops, supervisor
 from binky.registry import Registry, WorktreeStatus
+
+
+class _FakeAdapter(adapters.Adapter):
+    """Records the slices it holds in a class-level set so a test can assert teardown."""
+
+    store: ClassVar[set[str]] = set()
+
+    def provision(self, slice_name: str) -> None:
+        _FakeAdapter.store.add(slice_name)
+
+    def resolve(self, slice_name: str) -> str:
+        return f"fake://{slice_name}"
+
+    def teardown(self, slice_name: str) -> None:
+        _FakeAdapter.store.discard(slice_name)
 
 
 def test_reconcile_kills_orphans_and_sweeps(tmp_path: Path) -> None:
@@ -63,6 +79,139 @@ def test_reconcile_spares_a_recycled_pid(tmp_path: Path) -> None:
     finally:
         with contextlib.suppress(Exception):
             bystander.kill()
+        reg.close()
+
+
+def test_reconcile_tears_down_provisioning_slice_before_cascade(tmp_path: Path) -> None:
+    """A crash mid-provision leaves a `provisioning` worktree with a write-ahead slice row
+    and maybe a half-created external resource. Reconcile must tear that resource down before
+    delete_worktree cascades the row away — otherwise the resource leaks with no trace."""
+    adapters.register("reconcilefake", _FakeAdapter)  # undone by conftest's registry snapshot
+    _FakeAdapter.store.clear()
+    reg = Registry.connect(tmp_path / "binky.db")
+    try:
+        prov = reg.create_worktree("p", "b", "/y", "b", status=WorktreeStatus.provisioning)
+        reg.create_slice(prov.id, "db", "reconcilefake")
+        _FakeAdapter.store.add(adapters.slice_name("p", "b"))  # resource half-created
+
+        ops.reconcile(reg)
+
+        assert reg.get_worktree("p", "b") is None  # orphan worktree swept
+        assert adapters.slice_name("p", "b") not in _FakeAdapter.store  # ...resource torn down
+    finally:
+        reg.close()
+
+
+def test_gc_sweeps_stale_provisioning_slice_only(tmp_path: Path) -> None:
+    """`gc` tears down + drops a stale `provisioning` slice (write-ahead orphan) while
+    leaving `ready` slices — and slices younger than the TTL — untouched."""
+    adapters.register("reconcilefake", _FakeAdapter)  # undone by conftest's registry snapshot
+    _FakeAdapter.store.clear()
+    reg = Registry.connect(tmp_path / "binky.db")
+    try:
+        wt = reg.create_worktree("p", "a", "/x", "a", status=WorktreeStatus.ready)
+        reg.create_slice(wt.id, "db", "reconcilefake")  # provisioning (write-ahead)
+        _FakeAdapter.store.add(adapters.slice_name("p", "a"))
+        ready = reg.create_slice(wt.id, "cache", "reconcilefake")
+        reg.set_slice_ready(ready.id, "fake://cache")  # a healthy slice — must survive
+
+        # a fresh provisioning slice is protected by the TTL (an `up` may be in flight)
+        assert ops.gc(reg, {})["count"] == 0
+        assert {s.service for s in reg.slices_for(wt.id)} == {"db", "cache"}
+
+        # ttl=0 → the write-ahead row is now fair game
+        res = ops.gc(reg, {"ttl": 0})
+
+        assert res["count"] == 1
+        assert res["swept"][0]["service"] == "db"
+        assert adapters.slice_name("p", "a") not in _FakeAdapter.store  # resource torn down
+        remaining = {s.service: s.status for s in reg.slices_for(wt.id)}
+        assert "db" not in remaining  # provisioning row swept
+        assert remaining.get("cache") == "ready"  # ready slice left intact
+    finally:
+        reg.close()
+
+
+def _sleeper() -> subprocess.Popen:
+    return subprocess.Popen(
+        [sys.executable, "-c", "import time; time.sleep(30)"], **supervisor._new_group_kwargs()
+    )
+
+
+def test_reconcile_adopts_a_live_ready_worktree(tmp_path: Path) -> None:
+    """C3: a restart that finds a `ready` worktree whose processes are still alive adopts
+    them — they keep running, the worktree stays `ready`, and they're now supervised here
+    (the old behaviour killed them and dropped the worktree to `stopped`)."""
+    reg = Registry.connect(tmp_path / "binky.db")
+    procman = supervisor.ProcessManager()
+    survivor = _sleeper()
+    try:
+        wt = reg.create_worktree("p", "a", "/x", "a", status=WorktreeStatus.ready)
+        reg.allocate_port(wt.id, "web", "", 4500)
+        reg.add_process(wt.id, survivor.pid)
+
+        ops.reconcile(reg, procman)
+
+        a = reg.get_worktree("p", "a")
+        assert a is not None
+        assert a.status == "ready"  # not dropped to stopped
+        time.sleep(0.2)
+        assert survivor.poll() is None  # not killed
+        assert procman.is_running(wt.id)  # taken under supervision
+        assert survivor.pid in procman.pids(wt.id)
+        assert reg.processes_for(wt.id) == [survivor.pid]  # its row kept
+        assert reg.all_ports() == {4500}  # and its port
+    finally:
+        procman.stop_all()
+        with contextlib.suppress(Exception):
+            survivor.kill()
+        reg.close()
+
+
+def test_an_adopted_process_can_be_stopped(tmp_path: Path) -> None:
+    """An adopted process must go down through the normal stop path (what down/remove call),
+    even though the daemon never owned a Popen for it."""
+    reg = Registry.connect(tmp_path / "binky.db")
+    procman = supervisor.ProcessManager()
+    survivor = _sleeper()
+    try:
+        wt = reg.create_worktree("p", "a", "/x", "a", status=WorktreeStatus.ready)
+        reg.add_process(wt.id, survivor.pid)
+        ops.reconcile(reg, procman)
+        assert procman.is_running(wt.id)
+
+        assert procman.stop(wt.id) == 1  # one live process killed
+        survivor.wait(timeout=5)  # reap it (its real parent is this test process)
+        assert survivor.poll() is not None  # the adopted process actually terminated
+        assert not procman.is_running(wt.id)
+    finally:
+        with contextlib.suppress(Exception):
+            survivor.kill()
+        reg.close()
+
+
+def test_a_dead_adopted_process_takes_its_worktree_down(tmp_path: Path) -> None:
+    """An adopted process carries no restart policy: when it exits, the next tick reports the
+    worktree down (cleanly, not `failed`) so its slot and ports can be reclaimed."""
+    reg = Registry.connect(tmp_path / "binky.db")
+    procman = supervisor.ProcessManager()
+    victim = _sleeper()
+    try:
+        wt = reg.create_worktree("p", "a", "/x", "a", status=WorktreeStatus.ready)
+        reg.add_process(wt.id, victim.pid)
+        ops.reconcile(reg, procman)
+        assert procman.is_running(wt.id)
+
+        victim.kill()
+        victim.wait(timeout=5)  # reap, so the identity reads as truly gone
+        report = procman.tick(time.monotonic())
+
+        assert wt.id in report.worktrees_down  # reclaimed
+        assert wt.id not in report.failed  # a clean down, not a crash-loop give-up
+        assert not procman.is_running(wt.id)
+    finally:
+        with contextlib.suppress(Exception):
+            victim.kill()
         reg.close()
 
 

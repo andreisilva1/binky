@@ -14,7 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from _demo_app import WEB_SERVER_PY
-from binky import daemon, ipc, ops
+from binky import daemon, ipc, ops, settings
 from binky.config import load_config_data
 
 
@@ -45,7 +45,7 @@ def test_exposed_default_is_empty() -> None:
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("BINKY_PROXY_PORT", "0")
+    settings.save(settings.Settings(proxy_port=0, https_port=0))  # no proxy in tests
     yield
     with contextlib.suppress(Exception):
         daemon.stop(timeout=5)

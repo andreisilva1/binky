@@ -164,11 +164,18 @@ def _provision_adapters(
     both when the adapter can't clone and when a clone attempt fails (see
     :func:`_try_clone`).
     """
-    addresses = {sl.service: sl.address for sl in reg.slices_for(wt.id) if sl.address}
+    existing = {sl.service: sl for sl in reg.slices_for(wt.id)}
+    addresses = {s: sl.address for s, sl in existing.items() if sl.address}
     sl_name = adapters.slice_name(project, name)
     for sname, svc in services.items():
         if not svc.adapter or sname in addresses:
             continue
+        # Write-ahead: record the intent to provision *before* creating the external
+        # resource. A crash between the two then leaves a `provisioning` slice row as a
+        # trail (swept by `binky gc`) instead of an invisible orphan the teardown can't
+        # see. A leftover row from a prior crashed attempt is reused, not re-created
+        # (slices are UNIQUE per (worktree, service)).
+        slice_row = existing.get(sname) or reg.create_slice(wt.id, sname, svc.adapter)
         try:
             adapter = adapters.get(svc.adapter, _adapter_config(svc, sname, ports, name))
             cloned = bool(svc.clone_from) and bool(adapter.capabilities().get("clone"))
@@ -179,7 +186,6 @@ def _provision_adapters(
             address = adapter.resolve(sl_name)
         except adapters.AdapterError as exc:
             raise RpcFault("adapter", str(exc)) from exc
-        slice_row = reg.create_slice(wt.id, sname, svc.adapter)
         reg.set_slice_ready(slice_row.id, address)
         addresses[sname] = address
         if not cloned:  # a cloned slice already has migrate+seed baked into the golden
@@ -334,6 +340,52 @@ def _teardown_slices(reg, cfg, wt) -> None:
             adapters.get(svc.adapter, config).teardown(sl_name)
 
 
+def _teardown_slice_row(reg, wt, sl) -> None:
+    """Destroy the external resource one slice row points at, then drop the row.
+
+    Best-effort and idempotent (adapters tear down with ``DROP … IF EXISTS``), so it is
+    safe whether the resource still exists or not. The worktree's own ``binky.toml`` supplies
+    admin credentials when the checkout is still on disk; when it is already gone we fall back
+    to a bare adapter (which reads its ``BINKY_*_ADMIN_URL`` from the environment). Either way
+    the row is removed so it stops being a standing orphan — this is what makes C7-A's
+    write-ahead trail collectable instead of a leak."""
+    sl_name = adapters.slice_name(wt.project, wt.name)
+    config: dict = {}
+    with contextlib.suppress(Exception):
+        cfg = load_config(Path(wt.path) / "binky.toml")
+        svc = cfg.services.get(sl.service)
+        if svc:
+            config = _adapter_config(svc, sl.service, {}, wt.name)
+    with contextlib.suppress(Exception):
+        adapters.get(sl.adapter, config).teardown(sl_name)
+    reg.delete_slice(sl.id)
+
+
+# A `provisioning` slice younger than this may just be an `up` still in flight; older than
+# it, the write-ahead row is an orphan a crash left behind, and `gc` is free to sweep it.
+_GC_PROVISIONING_TTL = 300  # seconds
+
+
+def gc(reg: Registry, params: dict) -> dict:
+    """On-demand sweep of the trails a crash leaves behind.
+
+    Half-provisioned ``provisioning`` slices past ``_GC_PROVISIONING_TTL`` (the write-ahead
+    rows from ``_provision_adapters``) get their external resource torn down and the row
+    dropped. Complements the boot-time :func:`reconcile`: this one the user runs by hand,
+    without restarting the daemon, when they suspect something leaked."""
+    ttl = float(params.get("ttl", _GC_PROVISIONING_TTL))
+    cutoff = int(reg.now()) - int(ttl)
+    swept: list[dict] = []
+    for sl in reg.stale_provisioning_slices(cutoff):
+        wt = reg.get_worktree_by_id(sl.worktree_id)
+        if wt is None:  # the owning worktree is already gone; just drop the dangling row
+            reg.delete_slice(sl.id)
+        else:
+            _teardown_slice_row(reg, wt, sl)
+        swept.append({"service": sl.service, "adapter": sl.adapter, "worktree_id": sl.worktree_id})
+    return {"swept": swept, "count": len(swept)}
+
+
 def _select_services(cfg, group: str | None) -> dict:
     """All services, or a group's members plus their transitive dependencies."""
     if not group:
@@ -440,15 +492,29 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
         ports: dict[tuple[str, str], int] = {
             (p.service, p.label): p.port for p in reg.ports_for(wt.id)
         }
-        missing = [
-            req
-            for sname, svc in services.items()
-            for req in resolve.port_requests(sname, svc)
-            if req not in ports
+        needed = [
+            req for sname, svc in services.items() for req in resolve.port_requests(sname, svc)
         ]
+        missing = [req for req in needed if req not in ports]
         if missing:
             rng = tuple(cfg.project.port_range) if cfg.project.port_range else None
             ports.update(allocator.allocate(reg, wt.id, project, name, missing, rng))
+
+        # C8: a *reused* port (recorded, not just allocated) may have been taken by an
+        # outside process while this worktree was down. Reusing it blindly would crash-loop
+        # the service with no explanation — so bind-test each and fail loud with the port and
+        # service named. We don't auto-reallocate: something already holds the `env` we'd hand
+        # out. (Freshly allocated ports skip this — allocation already proved them free.)
+        reused = [req for req in needed if req not in missing]
+        for service, label in reused:
+            port = ports[(service, label)]
+            if allocator.is_bound(port):
+                raise RpcFault(
+                    "port_taken",
+                    f"port {port} (for '{service}') was Binky's, but another process took it "
+                    f"while '{name}' was down. Free that process and `binky up` again, or "
+                    f"`binky remove {name}` to release the port and get a fresh one.",
+                )
 
         addresses = _provision_adapters(reg, cfg, wt, project, name, ports, services)
 
@@ -521,29 +587,54 @@ def _rollback(reg, procman, cfg, wt, root, created_worktree: bool) -> None:
             reg.set_worktree_status(wt.id, WorktreeStatus.stopped)
 
 
-def reconcile(reg: Registry) -> None:
+def reconcile(reg: Registry, procman: ProcessManager | None = None) -> None:
     """On daemon startup, converge the registry against reality.
 
-    The daemon manages no processes yet, so any recorded PIDs are orphans from
-    before the restart — kill the ones that are *still the same process* we
-    recorded, and only those. A pid whose birth time no longer matches (or is
-    gone) belongs to a stranger the OS handed the recycled number to after a
-    reboot; killing it would be friendly fire, so we skip it and just drop the
-    stale row. Then: half-created ``provisioning`` worktrees are swept (C);
-    ``ready`` worktrees (whose processes died with the daemon) drop to
-    ``stopped``; ``stopped`` worktrees are left untouched (never GC'd).
+    A ``ready`` worktree whose recorded processes are *still alive* is *adopted*, not
+    killed (C3): the daemon takes them back under supervision and the worktree stays
+    ``ready`` — a daemon restart must not tear down running work. Adoption needs the live
+    ``procman``; without it (or with nothing still alive) the pre-C3 path runs instead.
+
+    That path treats recorded PIDs as orphans from before the restart — it kills the ones
+    that are *still the same process* we recorded, and only those. A pid whose birth time no
+    longer matches (or is gone) belongs to a stranger the OS handed the recycled number to;
+    killing it would be friendly fire, so we skip it and just drop the stale row. Then:
+    half-created ``provisioning`` worktrees are swept (C); ``ready`` (nothing left alive to
+    adopt) and pressure-``suspended`` worktrees (whose resume context was in-memory only)
+    drop to ``stopped``; ``stopped`` and ``failed`` worktrees are left untouched (never
+    GC'd) — a ``failed`` crash-loop verdict survives the restart as a standing alert.
     """
     for wt in reg.list_worktrees():
-        for pid, create_time in reg.process_identities(wt.id):
-            if is_same_process(pid, create_time):
+        identities = reg.process_identities(wt.id)
+        live = [(pid, ct) for pid, ct in identities if is_same_process(pid, ct)]
+
+        if wt.status == WorktreeStatus.ready and live and procman is not None:
+            adopted = procman.adopt(wt.id, live)
+            if adopted:  # keep it ready, now supervised in this daemon
+                adopted_set = set(adopted)
+                reg.clear_processes(wt.id)
+                for pid, ct in live:
+                    if pid in adopted_set:  # drop rows for pids that raced away
+                        reg.add_process(wt.id, pid, ct)
+                continue
+
+        for pid, ct in identities:
+            if is_same_process(pid, ct):
                 kill_pid(pid)
         reg.clear_processes(wt.id)
         if wt.status == WorktreeStatus.provisioning:
+            # Honor the write-ahead trail (C7-A): tear the half-created resources down
+            # *before* delete_worktree cascades their rows away, or the external resource
+            # would leak with nothing left in the registry pointing at it.
+            for sl in reg.slices_for(wt.id):
+                _teardown_slice_row(reg, wt, sl)
             with contextlib.suppress(Exception):
                 reg.release_ports(wt.id)
             with contextlib.suppress(Exception):
                 reg.delete_worktree(wt.id)
-        elif wt.status == WorktreeStatus.ready:
+        elif wt.status in (WorktreeStatus.ready, WorktreeStatus.suspended):
+            # `ready` died with the daemon; `suspended` lost its in-memory resume context
+            # on restart (C2) — both settle to a plain `stopped` the user can `up` again.
             reg.set_worktree_status(wt.id, WorktreeStatus.stopped)
 
 

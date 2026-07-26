@@ -15,6 +15,7 @@ import pytest
 from binky import adapters, ops, resolve
 from binky.config import load_config_data
 from binky.registry import Registry
+from binky.rpc import RpcFault
 from binky.supervisor import ProcessManager
 
 _FILESTORE = Path(__file__).resolve().parents[1] / "examples" / "adapters" / "filestore.py"
@@ -69,6 +70,51 @@ def test_adapter_provision_and_teardown(tmp_path, monkeypatch) -> None:
         ops.remove(reg, pm, {"root": str(proj), "worktree": "feat"})
         assert "acme_feat" not in FakeAdapter.store  # slice torn down
         assert reg.get_worktree("acme", "feat") is None
+    finally:
+        pm.stop_all()
+        reg.close()
+
+
+def test_provision_failure_leaves_no_orphan_resource(tmp_path, monkeypatch) -> None:
+    """Write-ahead: the slice row is recorded *before* the external resource is created.
+
+    So when provision creates the resource and then dies, rollback can still find the
+    slice row and tear the resource down — instead of leaking an orphan the teardown
+    never knew existed (which is what happened when create_slice ran only after provision).
+    """
+    monkeypatch.setenv("BINKY_HOME", str(tmp_path / "home"))
+
+    class HalfProvisioner(adapters.Adapter):
+        store: ClassVar[set[str]] = set()
+
+        def provision(self, slice_name: str) -> None:
+            HalfProvisioner.store.add(slice_name)  # the external resource now exists...
+            raise adapters.AdapterError("died after creating the resource")  # ...then we die
+
+        def resolve(self, slice_name: str) -> str:
+            return f"half://{slice_name}"
+
+        def teardown(self, slice_name: str) -> None:
+            HalfProvisioner.store.discard(slice_name)
+
+    adapters.register("halfprov", HalfProvisioner)
+    HalfProvisioner.store.clear()
+
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "binky.toml").write_text(
+        '[project]\nname = "acme"\n[services.db]\nadapter = "halfprov"\n', encoding="utf-8"
+    )
+    _init_git(proj)
+
+    reg = Registry.connect(tmp_path / "home" / "binky.db")
+    pm = ProcessManager()
+    try:
+        with pytest.raises(RpcFault):
+            ops.up(reg, pm, {"root": str(proj), "worktree": "feat"})
+        # the resource provision created was torn down (the row existed for rollback to find)
+        assert "acme_feat" not in HalfProvisioner.store
+        assert reg.get_worktree("acme", "feat") is None  # new worktree fully rolled back
     finally:
         pm.stop_all()
         reg.close()
