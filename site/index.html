@@ -182,6 +182,120 @@
     </div>
   </section>
 
+  <!-- ----------------------------------------------------------------- demo -->
+  <!-- A self-paced walkthrough: the short version of the docs. Every terminal
+       screen mirrors the CLI's real output format (src/binky/cli.py); the pids
+       and ports shown by `up`/`status` are runtime values and stand in for
+       illustration. The tokenised content lives here; demo.js only steps
+       through it and types the leading command. -->
+  <section id="demo">
+    <div class="container">
+      <div class="reveal">
+        <div class="sec-label">Walk through it</div>
+        <h2 class="sec-title">Install to a running worktree, one step at a time.</h2>
+        <p class="sec-lead">
+          The short version of the docs — six steps, at your own pace. Click through, or use the
+          arrow keys.
+        </p>
+      </div>
+
+      <div class="demo reveal" id="demoStage" tabindex="0" aria-roledescription="walkthrough">
+        <div class="demo-ide">
+          <div class="demo-bar">
+            <span class="demo-dot"></span><span class="demo-dot"></span><span class="demo-dot"></span>
+            <span class="demo-tab" id="demoTab">bash</span>
+          </div>
+
+          <div class="demo-screens" id="demoScreens">
+
+            <!-- 1 · install -->
+            <div class="demo-screen is-active" data-tab="bash">
+<pre><code class="term"><span class="term-cmd"><span class="prompt">$</span> <span class="cmd">uv tool install binky</span></span><span class="term-body">
+<span class="tok-cmt"># binky is now on your PATH</span>
+<span class="term-cmd"><span class="prompt">$</span> binky <span class="tok-flag">--version</span></span>
+<span class="tok-out">0.0.1</span></span></code></pre>
+            </div>
+
+            <!-- 2 · describe the stack (binky.toml) -->
+            <div class="demo-screen" data-tab="binky.toml">
+<pre><code><span class="tok-sec">[project]</span>
+<span class="tok-key">name</span>  = <span class="tok-str">"acme"</span>
+<span class="tok-key">https</span> = <span class="tok-str">true</span>
+
+<span class="tok-sec">[services.db]</span>
+<span class="tok-key">adapter</span>    = <span class="tok-str">"postgres"</span>
+<span class="tok-key">admin_url</span>  = <span class="tok-str">"${env.PG_ADMIN_URL}"</span>
+<span class="tok-key">clone_from</span> = <span class="tok-str">"golden"</span>   <span class="tok-cmt"># built once → cloned per worktree</span>
+
+<span class="tok-sec">[services.api]</span>
+<span class="tok-key">cmd</span> = <span class="tok-str">"uv run api --port ${self.port}"</span>
+<span class="tok-key">url</span> = <span class="tok-str">true</span>
+
+<span class="tok-sec">[services.web]</span>
+<span class="tok-key">cmd</span> = <span class="tok-str">"pnpm dev --port ${self.port}"</span>
+<span class="tok-key">url</span> = <span class="tok-str">true</span>
+
+<span class="tok-sec">[agents]</span>
+<span class="tok-key">expose</span> = [<span class="tok-str">"web"</span>, <span class="tok-str">"api"</span>, <span class="tok-str">"db"</span>]</code></pre>
+            </div>
+
+            <!-- 3 · check -->
+            <div class="demo-screen" data-tab="bash">
+<pre><code class="term"><span class="term-cmd"><span class="prompt">$</span> <span class="cmd">binky check</span></span><span class="term-body">
+<span class="tok-ok">✓ binky.toml is valid — project 'acme', 3 service(s)</span></span></code></pre>
+            </div>
+
+            <!-- 4 · up (pids/ports illustrative; line format is real) -->
+            <div class="demo-screen" data-tab="bash">
+<pre><code class="term"><span class="term-cmd"><span class="prompt">$</span> <span class="cmd">binky up login-fix</span></span><span class="term-body">
+<span class="tok-out">  db  pid 48213
+  api  pid 48217  :41003
+  web  pid 48219  :41005</span>
+<span class="tok-ok">✓ up: login-fix (3 service(s))</span></span></code></pre>
+            </div>
+
+            <!-- 5 · a second worktree, in parallel + status -->
+            <div class="demo-screen" data-tab="bash">
+<pre><code class="term"><span class="term-cmd"><span class="prompt">$</span> <span class="cmd">binky up checkout-v2</span></span><span class="term-body">   <span class="tok-cmt"># a second branch, in parallel</span>
+<span class="tok-ok">✓ up: checkout-v2 (3 service(s))</span>
+<span class="term-cmd"><span class="prompt">$</span> binky status</span>
+<b class="tok-proj">acme</b>
+<span class="tok-out">  checkout-v2  [running]
+      api  :41013
+      web  :41015
+  login-fix  [running]
+      api  :41003
+      web  :41005</span></span></code></pre>
+            </div>
+
+            <!-- 6 · hand it to an agent -->
+            <div class="demo-screen" data-tab="bash">
+<pre><code class="term"><span class="term-cmd"><span class="prompt">$</span> <span class="cmd">binky env login-fix</span></span><span class="term-body">
+<span class="tok-out">{"web": "http://web.login-fix.acme.localhost",
+ "api": "http://localhost:41003",
+ "db":  "postgresql://…/acme_login_fix"}</span></span></code></pre>
+            </div>
+
+          </div>
+        </div>
+
+        <aside class="demo-side">
+          <div class="demo-step" aria-live="polite">
+            <div class="demo-count"><span id="demoNum">1</span> / 6</div>
+            <h3 class="demo-title" id="demoTitle">Install Binky</h3>
+            <p class="demo-desc" id="demoDesc"></p>
+          </div>
+          <a class="demo-doc" id="demoDoc" href="./docs.html#install">See it in the docs <span class="arrow">→</span></a>
+          <div class="demo-controls">
+            <button class="demo-nav" id="demoPrev" type="button" aria-label="Previous step" disabled>←</button>
+            <div class="demo-dots" id="demoDots" role="tablist" aria-label="Walkthrough steps"></div>
+            <button class="demo-nav" id="demoNext" type="button" aria-label="Next step">→</button>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
   <!-- ------------------------------------------------------------- internals -->
   <section id="how">
     <div class="container">
@@ -290,5 +404,6 @@
 </footer>
 
 <script src="app.js"></script>
+<script src="demo.js"></script>
 </body>
 </html>
