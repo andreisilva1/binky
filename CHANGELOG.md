@@ -9,8 +9,29 @@ between minor versions.
 
 ## [Unreleased]
 
+### Added
+- Machine-global settings store (`~/.binky/settings.json`) with `binky config` to show it and
+  `binky reserve` / `binky port` to change it.
+- `binky gc` — sweep orphaned adapter slices left half-provisioned by a crash.
+- Disk headroom in admission: a worktree is admitted only when a fixed amount of free disk
+  (default 5 GB, tunable with `binky reserve --disk`) remains, alongside the existing RAM reserve.
+- Pressure eviction: when a running swarm crosses the RAM reserve, the daemon suspends the newest
+  worktree (new `suspended` status) and resumes it in fairness order once room returns.
+- Per-service log rotation, so a chatty service can't fill the disk.
+
 ### Changed
 - Relicensed from MIT to Apache-2.0.
+- The RAM reserve is now a percentage of total memory and the disk reserve a fixed GB headroom
+  (a percentage of a large disk would demand more free space than a nearly-full disk can offer).
+- A daemon restart now **adopts** still-live worktree processes instead of killing them; adopted
+  processes are supervised for liveness and can be stopped, and regain restart/health on the next `up`.
+
+### Fixed
+- `up` refuses to reuse a port that an outside process grabbed while the worktree was down,
+  reporting it instead of crash-looping the service.
+- `stop` escalates a SIGKILL to the whole process group, so a child that ignores SIGTERM can't
+  orphan its descendants.
+- Bind failures are surfaced by `up` and `doctor` instead of failing silently.
 
 ## [0.0.1] - 2026-07-25
 

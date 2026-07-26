@@ -248,6 +248,10 @@ dependency-free one in 30 lines.
 | `binky env <name> [--dotenv]` | Print a worktree's exposed coordinates, for you or an agent |
 | `binky verify <name>` | Run the project's `agents.verify` checks; exits non-zero on failure |
 | `binky logs <name>` | Print a worktree's captured service logs |
+| `binky gc` | Sweep orphaned adapter slices a crash left half-provisioned |
+| `binky config` | Show the machine-global settings (RAM/disk reserves, proxy ports) |
+| `binky reserve [--ram %] [--disk gb]` | Set how much RAM/disk Binky permanently keeps free |
+| `binky port [--proxy p] [--https p]` | Set the proxy/HTTPS ports |
 | `binky dashboard` | Live TUI of every worktree |
 | `binky doctor` | Diagnose the install and daemon; exits non-zero if something is wrong |
 | `binky metrics` | Point-in-time daemon metrics as JSON |
@@ -287,11 +291,14 @@ A single machine-global daemon sits between your worktrees and the machine:
 4. **Supervision** — starts services in `depends_on` order, waits for health, captures logs.
 5. **Proxy** — routes `<service>.<worktree>.<domain>` to the right port (WebSockets/HMR included).
    Set `https = true` and Binky fronts it with Caddy for TLS via a local CA, when Caddy is on PATH.
-6. **Admission** — a FIFO queue bounded by `max_parallel` and free RAM, so the swarm doesn't melt
-   the box.
+6. **Admission** — a FIFO queue that only starts a worktree when the machine has room: fewer than
+   `max_parallel` running **and** enough free RAM (a percentage kept in reserve) **and** enough free
+   disk (a fixed GB headroom). If a running swarm later crosses the RAM reserve, the daemon suspends
+   the newest worktree to relieve pressure and resumes it — in fairness order — once room returns.
+   Tune the reserves with `binky reserve`; see them with `binky config`.
 
-State lives in `~/.binky/` (a SQLite registry, migrated in place across upgrades). Nothing runs in
-the cloud, and Binky never phones home.
+State lives in `~/.binky/` (a SQLite registry plus a settings store, migrated in place across
+upgrades). Nothing runs in the cloud, and Binky never phones home.
 
 ## Examples
 

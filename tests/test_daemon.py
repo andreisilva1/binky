@@ -5,12 +5,39 @@ import contextlib
 import os
 import stat
 import threading
+import time
 
 import pytest
 
-from binky import daemon, ipc, paths
+from binky import daemon, ipc, paths, rpc, settings
 from binky.registry import WorktreeStatus
 from binky.supervisor import TickReport
+
+
+class _FakeProcman:
+    """A stand-in for ProcessManager for the pressure-eviction tests: it reports the
+    given worktrees as running and records which ones get stopped, without real children."""
+
+    def __init__(self, running) -> None:
+        self.running = set(running)
+        self.stopped: list[int] = []
+
+    def is_running(self, wt_id: int) -> bool:
+        return wt_id in self.running
+
+    def stop(self, wt_id: int) -> None:
+        self.stopped.append(wt_id)
+        self.running.discard(wt_id)
+
+
+def _seed_slotted(d: daemon.Daemon, project: str, name: str, token: int):
+    """Register a ready worktree that holds admission slot `token`, as a live `up` would."""
+    wt = d.registry.create_worktree(
+        project, name, f"/tmp/{name}", name, status=WorktreeStatus.ready
+    )
+    d._slots[(project, name)] = token
+    d._up_params[(project, name)] = {"root": f"/tmp/{name}", "worktree": name}
+    return wt
 
 unix_only = pytest.mark.skipif(os.name == "nt", reason="Windows uses a loopback TCP port")
 
@@ -18,7 +45,8 @@ unix_only = pytest.mark.skipif(os.name == "nt", reason="Windows uses a loopback 
 @pytest.fixture(autouse=True)
 def isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("BINKY_HOME", str(tmp_path))
-    monkeypatch.setenv("BINKY_PROXY_PORT", "0")
+    # ports live in the settings store now; disable the proxy so tests don't bind :80
+    settings.save(settings.Settings(proxy_port=0, https_port=0))
     yield
     # best-effort: never leave a spawned daemon behind
     with contextlib.suppress(Exception):
@@ -32,22 +60,26 @@ def test_not_running_initially() -> None:
         ipc.call("ping")
 
 
-def test_a_daemon_that_dies_on_startup_says_why(monkeypatch) -> None:
+def test_a_daemon_that_dies_on_startup_says_why() -> None:
     """A failed start must report the cause, not just that time ran out.
 
     With stderr going to DEVNULL these two were the same event to the caller,
-    which is what made a dead daemon look like a slow one. An unparseable proxy
-    port kills the daemon before it writes its endpoint file, so this exercises
-    the path where there is nothing to ping and never will be.
+    which is what made a dead daemon look like a slow one. A directory sitting
+    where the registry's SQLite file belongs kills the daemon in its
+    constructor, before it writes its endpoint file — so this exercises the path
+    where there is nothing to ping and never will be. BINKY_HOME itself stays a
+    real directory, so the daemon's stderr log is still captured and returned.
     """
-    monkeypatch.setenv("BINKY_PROXY_PORT", "not-a-port")
+    # occupy the db path with a directory so sqlite3.connect can't open it
+    paths.db_path().mkdir(parents=True, exist_ok=True)
 
     with pytest.raises(RuntimeError) as excinfo:
         daemon.start(timeout=30)
 
     message = str(excinfo.value)
     assert "exited with code" in message, message  # fast-failed, didn't wait out the timeout
-    assert "not-a-port" in message  # and carried the daemon's own traceback back
+    # and carried the daemon's own error back, not a bare "timed out"
+    assert "unable to open database file" in message, message
     assert paths.daemon_log_path().exists()
 
 
@@ -172,6 +204,203 @@ def test_apply_report_keeps_registry_io_off_the_event_loop() -> None:
         assert d.registry.get_worktree_by_id(wt.id).status == "stopped"  # ...and still applied
         assert ("proj", "alpha") not in d._slots  # slot freed on the loop
         assert d.routes == {}  # route dropped on the loop
+    finally:
+        d.registry.close()
+
+
+def test_reachability_warnings_flag_a_dead_proxy() -> None:
+    """`up` must not print a clean success when the proxy that serves its hostnames
+    never bound. With routes present and a bind error recorded, a warning appears; with
+    the proxy healthy, none does — and https is only warned about when it was asked for."""
+    d = daemon.Daemon()
+    try:
+        routes = {"alpha.proj.test": 4000}
+        assert d._reachability_warnings(routes, wants_https=False) == []  # healthy: silent
+
+        d._proxy_error = ":80 — [Errno 13] Permission denied"
+        warnings = d._reachability_warnings(routes, wants_https=False)
+        assert len(warnings) == 1
+        assert "hostnames won't resolve" in warnings[0]
+        assert ":port" in warnings[0]  # ...but points at the fallback that still works
+
+        # a worktree with no routes isn't affected by a dead proxy
+        assert d._reachability_warnings({}, wants_https=False) == []
+
+        d._https_error = "Caddy is not on PATH"
+        both = d._reachability_warnings(routes, wants_https=True)
+        assert any("https" in w for w in both)
+        # https is only surfaced when the project actually requested it
+        assert not any("https" in w for w in d._reachability_warnings(routes, wants_https=False))
+    finally:
+        d.registry.close()
+
+
+def test_doctor_rpc_reports_proxy_and_https_state() -> None:
+    d = daemon.Daemon()
+    try:
+        d._proxy_port = 80
+        d._https_error = "Caddy is not on PATH"
+        report = asyncio.run(d._doctor({}))
+        assert report == {
+            "proxy_port": 80,
+            "proxy_error": None,
+            "https_active": False,
+            "https_error": "Caddy is not on PATH",
+        }
+    finally:
+        d.registry.close()
+
+
+def test_up_refuses_fast_when_admission_can_never_succeed() -> None:
+    """A resource floor that nothing can free must make `up` fail with an actionable
+    message immediately, not hang until the caller's RPC times out."""
+    d = daemon.Daemon()
+    try:
+        d.admission.min_free_disk_bytes = 10**18  # impossible, and nothing is running
+        with pytest.raises(rpc.RpcFault) as excinfo:
+            asyncio.run(d._up({"root": "/nonexistent", "worktree": "x"}))
+        assert excinfo.value.code == "resource_exhausted"
+        assert "disk" in excinfo.value.message
+        assert d.admission.queued == 0  # refused outright, never enqueued
+    finally:
+        d.registry.close()
+
+
+def test_pressure_suspends_the_newest_worktree() -> None:
+    """When free RAM sits under the reserve for a streak of ticks, the daemon pauses the
+    newest worktree (highest admission token, LIFO), frees its slot, and parks it to come
+    back — leaving older worktrees running."""
+    d = daemon.Daemon()
+    try:
+        d.admission.min_free_disk_bytes = 0  # isolate the RAM path
+        alpha = _seed_slotted(d, "proj", "alpha", token=1)
+        beta = _seed_slotted(d, "proj", "beta", token=2)  # newest
+        d.procman = _FakeProcman({alpha.id, beta.id})
+        d.admission.min_free_bytes = 10**18  # under pressure, and can't self-admit yet
+
+        async def run():
+            for _ in range(daemon.PRESSURE_TICKS):
+                await d._relieve_pressure()
+            captured = {
+                "stopped": list(d.procman.stopped),
+                "beta_slotted": ("proj", "beta") in d._slots,
+                "alpha_slotted": ("proj", "alpha") in d._slots,
+                "beta_status": d.registry.get_worktree_by_id(beta.id).status,
+                "parked": ("proj", "beta") in d._resume_tasks,
+            }
+            for t in list(d._resume_tasks.values()):  # tidy the parked waiter in-loop
+                t.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t
+            return captured
+
+        out = asyncio.run(run())
+        assert out["stopped"] == [beta.id]  # newest, and only it
+        assert not out["beta_slotted"]  # its RAM slot was released
+        assert out["alpha_slotted"]  # the older one keeps running
+        assert out["beta_status"] == "suspended"
+        assert out["parked"]  # queued to resume itself
+    finally:
+        d.registry.close()
+
+
+def test_a_suspended_worktree_resumes_itself_when_pressure_clears(monkeypatch) -> None:
+    """A parked worktree waits in the admission FIFO; once RAM frees, the pump admits it and
+    it re-ups (re-spawn, no re-provision) back to ready, restoring its routes and slot."""
+    d = daemon.Daemon()
+    try:
+        d.admission.min_free_disk_bytes = 0
+        beta = _seed_slotted(d, "proj", "beta", token=2)
+        d.procman = _FakeProcman({beta.id})
+
+        def fake_up(reg, procman, params):  # resume re-ups via ops.up; stub the heavy part
+            reg.set_worktree_status(beta.id, WorktreeStatus.ready)
+            return {"project": "proj", "worktree": "beta", "routes": {"beta.proj.test": 4100}}
+
+        monkeypatch.setattr(daemon.ops, "up", fake_up)
+
+        async def run():
+            d.admission.min_free_bytes = 10**18  # pressure on
+            for _ in range(daemon.PRESSURE_TICKS):
+                await d._relieve_pressure()
+            assert d.registry.get_worktree_by_id(beta.id).status == "suspended"
+            task = d._resume_tasks[("proj", "beta")]
+            d.admission.min_free_bytes = 0  # pressure clears
+            d.admission.pump()  # admits the parked waiter
+            await asyncio.wait_for(task, timeout=2)
+            return {
+                "status": d.registry.get_worktree_by_id(beta.id).status,
+                "slotted": ("proj", "beta") in d._slots,
+                "routes": dict(d.routes),
+                "resumed": ("proj", "beta") in d._resumed_at,
+                "still_parked": bool(d._resume_tasks),
+            }
+
+        out = asyncio.run(run())
+        assert out["status"] == "ready"  # brought back up on its own
+        assert out["slotted"]
+        assert out["routes"] == {"beta.proj.test": 4100}  # routing restored
+        assert out["resumed"]  # timestamped, so it isn't the next to be evicted
+        assert not out["still_parked"]  # the task cleared itself on success
+    finally:
+        d.registry.close()
+
+
+def test_a_just_resumed_worktree_is_protected_from_immediate_re_eviction() -> None:
+    """Anti-flap: the newest worktree is skipped while inside its post-resume grace window,
+    so a return of pressure evicts an older, unprotected one instead of thrashing the same."""
+    d = daemon.Daemon()
+    try:
+        d.admission.min_free_disk_bytes = 0
+        alpha = _seed_slotted(d, "proj", "alpha", token=1)
+        beta = _seed_slotted(d, "proj", "beta", token=2)  # newest, but just resumed
+        d.procman = _FakeProcman({alpha.id, beta.id})
+        d._resumed_at[("proj", "beta")] = time.monotonic()  # inside the grace window
+        d.admission.min_free_bytes = 10**18
+
+        async def run():
+            evicted = await d._evict_one_under_pressure()
+            captured = {"evicted": evicted, "stopped": list(d.procman.stopped)}
+            for t in list(d._resume_tasks.values()):
+                t.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await t
+            return captured
+
+        out = asyncio.run(run())
+        assert out["evicted"] is True
+        assert out["stopped"] == [alpha.id]  # the older, unprotected one — not the newest
+    finally:
+        d.registry.close()
+
+
+def test_taking_a_suspended_worktree_down_cancels_its_pending_resume() -> None:
+    """A real `down`/`remove` outranks a pending resume: releasing the slot cancels the
+    parked waiter and forgets its up-params, so freed RAM never resurrects it."""
+    d = daemon.Daemon()
+    try:
+        d.admission.min_free_disk_bytes = 0
+        beta = _seed_slotted(d, "proj", "beta", token=2)
+        d.procman = _FakeProcman({beta.id})
+        d.admission.min_free_bytes = 10**18
+
+        async def run():
+            for _ in range(daemon.PRESSURE_TICKS):
+                await d._relieve_pressure()
+            task = d._resume_tasks[("proj", "beta")]
+            d._release_slot("proj", "beta")  # what _down/_remove drive
+            for _ in range(3):
+                await asyncio.sleep(0)  # let the cancellation settle
+            return {
+                "done": task.done(),
+                "tasks": bool(d._resume_tasks),
+                "params": bool(d._up_params),
+            }
+
+        out = asyncio.run(run())
+        assert out["done"]  # the parked waiter stopped
+        assert not out["tasks"]  # and was forgotten
+        assert not out["params"]  # along with its resume context
     finally:
         d.registry.close()
 

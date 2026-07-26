@@ -20,12 +20,14 @@ import subprocess
 import sys
 import time
 
-from binky import admission, ipc, observability, ops, paths, proxy, rpc
+from binky import admission, ipc, observability, ops, paths, proxy, rpc, settings
 from binky.https import Caddy
 from binky.registry import Registry, WorktreeStatus
 from binky.supervisor import ProcessManager, TickReport
 
 SUPERVISE_INTERVAL = 2.0  # seconds between live supervision ticks
+PRESSURE_TICKS = 3  # consecutive over-floor ticks before we evict (hysteresis, ~6s)
+EVICT_GRACE = 30.0  # seconds a just-resumed worktree is protected from re-eviction (anti-flap)
 
 
 class Daemon:
@@ -34,15 +36,27 @@ class Daemon:
         self._token = secrets.token_hex(16)
         self.registry = Registry.connect()
         self.procman = ProcessManager()
-        self.admission = admission.make_default()
+        self.settings = settings.load()  # machine-global reserves + ports, read at boot
+        self.admission = admission.make_default(self.settings)
         self._slots: dict[tuple[str, str], int] = {}
+        # C2 pressure eviction: what a suspended worktree needs to bring itself back,
+        # the parked task waiting in the admission queue to do so, and when each was last
+        # resumed (so a just-resumed worktree isn't the one we immediately evict again).
+        self._up_params: dict[tuple[str, str], dict] = {}
+        self._resume_tasks: dict[tuple[str, str], asyncio.Task] = {}
+        self._resumed_at: dict[tuple[str, str], float] = {}
+        self._pressure_ticks = 0
         self._wt_locks: dict[tuple[str | None, str | None], asyncio.Lock] = {}
         self.routes: dict[str, int] = {}
         self._routes_by_wt: dict[tuple[str, str], dict[str, int]] = {}
         self.proxy = proxy.Proxy(lambda host: self.routes.get(host))
         self._proxy_port = 0
+        self._proxy_error: str | None = None  # why the HTTP proxy isn't listening, if it isn't
+        self._https_error: str | None = None  # why TLS fronting is unavailable, if requested
         self._caddy: Caddy | None = None
-        ops.reconcile(self.registry)  # clean up whatever a previous daemon left behind
+        # Adopt any still-live worktrees a previous daemon left running, and clean up the
+        # rest (C3). Needs procman (built above) so adoption has somewhere to register.
+        ops.reconcile(self.registry, self.procman)
         self.router = rpc.Router()
         self.router.add("ping", self._ping)
         self.router.add("shutdown", self._shutdown)
@@ -55,6 +69,10 @@ class Daemon:
         self.router.add("verify", self._verify)
         self.router.add("env", self._env)
         self.router.add("metrics", self._metrics)
+        self.router.add("doctor", self._doctor)
+        self.router.add("gc", self._gc)
+        self.router.add("settings_get", self._settings_get)
+        self.router.add("settings_set", self._settings_set)
 
     async def _ping(self, _params: dict) -> dict:
         return {"pong": True, "pid": os.getpid()}
@@ -79,12 +97,17 @@ class Daemon:
 
     async def _up(self, params: dict) -> dict:
         async with self._wt_lock(params.get("root"), params.get("worktree")):
-            with contextlib.suppress(Exception):  # apply the project's max_parallel / https prefs
+            wants_https = False
+            with contextlib.suppress(Exception):  # apply the project's https preference
                 cfg = ops._load(params.get("root"))
-                if cfg.project.max_parallel:
-                    self.admission.set_max_parallel(cfg.project.max_parallel)
-                if cfg.project.https:
+                wants_https = bool(cfg.project.https)
+                if wants_https:
                     self._ensure_https()
+            # Refuse fast when the wait could never end (a resource floor with nothing
+            # running to free it) rather than hang until the caller's RPC times out.
+            refusal = self.admission.rejection()
+            if refusal is not None:
+                raise rpc.RpcFault("resource_exhausted", refusal)
             token = await self.admission.acquire()  # FIFO — waits for capacity
             try:
                 # off the event loop: wait_healthy / migrate must not block other requests
@@ -92,9 +115,14 @@ class Daemon:
             except BaseException:
                 self.admission.release(token)
                 raise
-            self._slots[(result["project"], result["worktree"])] = token
-            self._routes_by_wt[(result["project"], result["worktree"])] = result.get("routes", {})
+            key = (result["project"], result["worktree"])
+            self._slots[key] = token
+            self._up_params[key] = params  # remembered so a pressure-suspend can re-up it (C2)
+            self._routes_by_wt[key] = result.get("routes", {})
             self._rebuild_routes()
+            warnings = self._reachability_warnings(result.get("routes"), wants_https)
+            if warnings:
+                result["warnings"] = warnings
             observability.log_event(
                 "up", project=result["project"], worktree=result["worktree"],
                 services=len(result.get("services", [])),
@@ -116,19 +144,66 @@ class Daemon:
         return result
 
     def _release_slot(self, project: str, worktree: str) -> None:
-        token = self._slots.pop((project, worktree), None)
+        key = (project, worktree)
+        token = self._slots.pop(key, None)
         if token is not None:
             self.admission.release(token)
-        self._routes_by_wt.pop((project, worktree), None)
+        self._routes_by_wt.pop(key, None)
         self._rebuild_routes()
+        # A worktree going down for real (down/remove/died) outranks a pending resume:
+        # cancel the parked waiter so RAM freeing up doesn't resurrect it (C2).
+        self._cancel_resume(key)
+        self._up_params.pop(key, None)
+        self._resumed_at.pop(key, None)
+
+    def _cancel_resume(self, key: tuple[str, str]) -> None:
+        task = self._resume_tasks.pop(key, None)
+        if task is not None and not task.done():
+            task.cancel()
 
     def _ensure_https(self) -> None:
-        """Lazily front the running proxy with Caddy for TLS (once, if Caddy is present)."""
-        if self._caddy is not None or self._proxy_port <= 0:
+        """Lazily front the running proxy with Caddy for TLS (once, if Caddy is present).
+
+        Records why it couldn't, when it can't, so a project that asked for `https` isn't
+        silently served plain HTTP — `up` and `doctor` surface the reason.
+        """
+        if self._caddy is not None:
             return
-        caddy = Caddy(self._proxy_port, https_port=int(os.environ.get("BINKY_HTTPS_PORT", "443")))
-        if caddy.available and caddy.start():
+        if self._proxy_port <= 0:
+            self._https_error = "the HTTP proxy isn't listening, so there's nothing to front"
+            return
+        caddy = Caddy(self._proxy_port, https_port=self.settings.https_port)
+        if not caddy.available:
+            self._https_error = "Caddy is not on PATH"
+            return
+        if caddy.start():
             self._caddy = caddy
+            self._https_error = None
+        else:
+            self._https_error = "Caddy is installed but failed to start (see daemon log)"
+
+    def _reachability_warnings(self, routes: dict | None, wants_https: bool) -> list[str]:
+        """Honest, up-time warnings for anything that stops a worktree's *hostnames* from
+        resolving. The per-service ports still work; the point is to never let `up` print a
+        clean success while the routing the user expects is quietly dead."""
+        warnings: list[str] = []
+        if routes and self._proxy_error:
+            warnings.append(
+                f"http proxy isn't listening on {self._proxy_error} — hostnames won't "
+                "resolve; reach services by their :port instead"
+            )
+        if wants_https and self._https_error:
+            warnings.append(f"https was requested but is unavailable: {self._https_error}")
+        return warnings
+
+    async def _doctor(self, _params: dict) -> dict:
+        """Daemon-internal health the CLI's `doctor` can't see from outside the process."""
+        return {
+            "proxy_port": self._proxy_port,
+            "proxy_error": self._proxy_error,
+            "https_active": self._caddy is not None,
+            "https_error": self._https_error,
+        }
 
     def _rebuild_routes(self) -> None:
         self.routes = {
@@ -148,6 +223,99 @@ class Daemon:
                 await asyncio.sleep(SUPERVISE_INTERVAL)
                 report = await asyncio.to_thread(self.procman.tick, time.monotonic())
                 await self._apply_report(report)
+                await self._relieve_pressure()
+
+    async def _relieve_pressure(self) -> None:
+        """Evict the newest worktree when free RAM has sat below the reserve for a while.
+
+        The admission gate only keeps RAM free at *start*; a worktree admitted when the
+        machine was healthy can still grow it into the reserve. Rather than leave the OS to
+        OOM-kill something at random, Binky pauses the **newest** worktree (LIFO — the one
+        that has invested the least) and re-queues it in the admission FIFO, so it comes
+        back on its own once the pressure clears. A short streak (``PRESSURE_TICKS``) avoids
+        reacting to a momentary spike; resetting the streak after an eviction gives the freed
+        RAM time to actually come back before we consider evicting a second one."""
+        if self.admission.under_pressure():
+            self._pressure_ticks += 1
+        else:
+            self._pressure_ticks = 0
+        if self._pressure_ticks >= PRESSURE_TICKS and await self._evict_one_under_pressure():
+            self._pressure_ticks = 0
+
+    async def _evict_one_under_pressure(self) -> bool:
+        """Suspend the newest un-protected running worktree; True if one was suspended.
+
+        Newest = highest admission token. A worktree resumed within ``EVICT_GRACE`` is
+        skipped so we don't immediately re-evict what we just brought back (anti-flap); if
+        every candidate is within grace, we suspend nothing this round and wait it out."""
+        now = time.monotonic()
+        for key, _token in sorted(self._slots.items(), key=lambda kv: kv[1], reverse=True):
+            if now - self._resumed_at.get(key, 0.0) < EVICT_GRACE:
+                continue
+            await self._suspend(key)
+            return True
+        return False
+
+    async def _suspend(self, key: tuple[str, str]) -> None:
+        """Pause a worktree under pressure: stop its processes, mark it suspended, free its
+        RAM slot, and park a task that re-ups it once the admission queue lets it back in.
+        Ports and slices are kept, so the resume is a re-spawn, not a re-provision."""
+        project, worktree = key
+        params = self._up_params.get(key)
+        root = params.get("root") if params else None
+        async with self._wt_lock(root, worktree):
+            wt = await asyncio.to_thread(self.registry.get_worktree, project, worktree)
+            if wt is None or not self.procman.is_running(wt.id):
+                return  # went down between selection and here — nothing to suspend
+            await asyncio.to_thread(self.procman.stop, wt.id)
+            await asyncio.to_thread(self.registry.clear_processes, wt.id)
+            await asyncio.to_thread(
+                self.registry.set_worktree_status, wt.id, WorktreeStatus.suspended
+            )
+        # off-loop work done; the slot/route bookkeeping touches asyncio state, stay on-loop.
+        # NB: not _release_slot — that would cancel the very resume task we're about to park.
+        token = self._slots.pop(key, None)
+        if token is not None:
+            self.admission.release(token)
+        saved_routes = self._routes_by_wt.pop(key, None)
+        self._rebuild_routes()
+        observability.log_event("suspend", project=project, worktree=worktree)
+        self._resume_tasks[key] = asyncio.create_task(
+            self._resume_when_admitted(key, saved_routes)
+        )
+
+    async def _resume_when_admitted(self, key: tuple[str, str], saved_routes: dict | None) -> None:
+        """Wait in the admission FIFO on a suspended worktree's behalf; re-up it when let in.
+
+        Parked in the same queue a fresh ``up`` waits in, so pressure clearing (the pump)
+        wakes it in fairness order. If it was taken down while parked, it yields the slot and
+        stays down instead of resurrecting."""
+        project, worktree = key
+        params = self._up_params.get(key)
+        if params is None:
+            return
+        try:
+            token = await self.admission.acquire()
+        except asyncio.CancelledError:
+            return  # taken down while parked; _release_slot already cleaned up
+        try:
+            async with self._wt_lock(params.get("root"), worktree):
+                wt = await asyncio.to_thread(self.registry.get_worktree, project, worktree)
+                if wt is None or wt.status != WorktreeStatus.suspended:
+                    self.admission.release(token)  # no longer ours to bring back
+                    return
+                result = await asyncio.to_thread(ops.up, self.registry, self.procman, params)
+            self._slots[key] = token
+            self._routes_by_wt[key] = result.get("routes", saved_routes or {})
+            self._rebuild_routes()
+            self._resumed_at[key] = time.monotonic()
+            observability.log_event("resume", project=project, worktree=worktree)
+        except BaseException:
+            self.admission.release(token)
+            observability.log_event("resume_failed", project=project, worktree=worktree)
+            raise
+        finally:
+            self._resume_tasks.pop(key, None)
 
     async def _apply_report(self, report: TickReport) -> None:
         """Sync a supervision tick to the registry + admission/routes.
@@ -163,7 +331,10 @@ class Daemon:
             observability.log_event("restart", worktree_id=wt_id, service=service)
         for wt in downed:  # free the RAM slot + drop proxy routes
             self._release_slot(wt.project, wt.name)
-            observability.log_event("gc", project=wt.project, worktree=wt.name)
+            if wt.id in report.failed:  # crash-looped past give-up — a consumable alert
+                observability.log_event("worktree_failed", project=wt.project, worktree=wt.name)
+            else:
+                observability.log_event("gc", project=wt.project, worktree=wt.name)
 
     def _sync_registry(self, report: TickReport) -> list:
         """Off-loop: apply pid changes and mark down worktrees stopped. Returns the
@@ -179,7 +350,10 @@ class Daemon:
             with contextlib.suppress(Exception):
                 wt = self.registry.get_worktree_by_id(wt_id)
                 self.registry.clear_processes(wt_id)
-                self.registry.set_worktree_status(wt_id, WorktreeStatus.stopped)
+                # crash-loop give-up is a distinct terminal state from an intentional pause,
+                # so `status` can show "failed" instead of a look-alike "stopped".
+                status = WorktreeStatus.failed if wt_id in report.failed else WorktreeStatus.stopped
+                self.registry.set_worktree_status(wt_id, status)
             if wt is not None:
                 downed.append(wt)
         return downed
@@ -204,6 +378,40 @@ class Daemon:
         return await asyncio.to_thread(
             observability.collect_metrics, self.registry, self.procman, self.admission
         )
+
+    async def _gc(self, params: dict) -> dict:
+        # teardown calls can block on a real server round-trip, so keep it off the loop
+        return await asyncio.to_thread(ops.gc, self.registry, params)
+
+    def _settings_payload(self) -> dict:
+        from dataclasses import asdict
+
+        return {
+            **asdict(self.settings),
+            # ports are read at boot; a change to them only lands on the next daemon start
+            "proxy_port_live": self._proxy_port,
+        }
+
+    async def _settings_get(self, _params: dict) -> dict:
+        return self._settings_payload()
+
+    async def _settings_set(self, params: dict) -> dict:
+        """Persist a partial settings change and apply what can take effect live.
+
+        Reserves apply immediately (admission reads them on the next check); port changes
+        are recorded but only bind on the next daemon start, which the reply flags."""
+        changes = {k: v for k, v in params.items() if v is not None}
+        try:
+            self.settings = await asyncio.to_thread(lambda: settings.update(**changes))
+        except settings.SettingsError as exc:
+            raise rpc.RpcFault("bad_request", str(exc)) from exc
+        self.admission.set_reserves(self.settings.ram_reserve_pct, self.settings.disk_reserve_gb)
+        payload = self._settings_payload()
+        # only claim a restart is needed when a port value actually differs from what's bound
+        payload["restart_required"] = self.settings.proxy_port != self._proxy_port and bool(
+            {"proxy_port", "https_port"} & set(changes)
+        )
+        return payload
 
     async def _handle(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
@@ -246,11 +454,17 @@ class Daemon:
             with contextlib.suppress(NotImplementedError, ValueError):
                 loop.add_signal_handler(sig, self._stop.set)
 
-        proxy_port = int(os.environ.get("BINKY_PROXY_PORT", "80"))
+        proxy_port = self.settings.proxy_port
         if proxy_port > 0:
-            with contextlib.suppress(OSError):
+            try:
                 await self.proxy.start(proxy_port)
                 self._proxy_port = proxy_port
+            except OSError as exc:
+                # The daemon still serves RPC and per-service ports; only hostname routing
+                # is lost. Record *why* (privileged :80 without root, port already taken)
+                # so `up`/`doctor` can say so instead of the user finding dead hostnames.
+                self._proxy_error = f":{proxy_port} — {exc}"
+                observability.log_event("proxy_bind_failed", port=proxy_port, error=str(exc))
         pump_task = asyncio.create_task(self._pump_loop())
         supervise_task = asyncio.create_task(self._supervise_loop())
         ipc.write_daemon_info(info)

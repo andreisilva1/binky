@@ -69,6 +69,27 @@ cmd = "pnpm dev --port ${self.port}"     # not just "pnpm dev"
 
 This is the single most common cause of "two worktrees collide even with Binky".
 
+### `up` says a port "was Binky's, but another process took it"
+
+While a worktree is down, Binky keeps its ports reserved so a later `up` is stable — but nothing
+stops an outside process from grabbing a now-idle port in the meantime. Rather than start a service
+that would just crash-loop, `up` reports it. Free the process sitting on that port and `binky up`
+again, or `binky remove <name>` to release the reservation and get a fresh port on the next `up`.
+
+---
+
+## Capacity
+
+### `up` is queued, or a running worktree went `suspended`
+
+Binky admits a worktree only when the machine has room: under `max_parallel`, above the RAM reserve,
+and above the disk headroom. If a swarm later crosses the RAM reserve, the daemon suspends the newest
+worktree to relieve pressure and resumes it — in fairness order — once room returns; a `suspended`
+worktree is waiting for that room, not broken. See the current limits with `binky config`, and raise
+how much you leave the machine (or lower it to pack more in) with `binky reserve --ram 15 --disk 3`.
+If `up` reports the request can *never* be admitted, the reserve is larger than the machine can ever
+satisfy — lower it.
+
 ---
 
 ## URLs and the proxy

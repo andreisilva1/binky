@@ -30,12 +30,13 @@ The lifecycle the README describes maps onto these modules:
 | **Resources** | `adapters.py`, `builtin_adapters.py`, `adapter_sdk.py` | Carve an isolated slice of a shared server per worktree; tear it down on remove. |
 | **Supervision** | `supervisor.py`, `health.py`, `procs.py` | Start services in `depends_on` order, wait for health, capture logs, restart per policy, reclaim dead worktrees. |
 | **Proxy** | `proxy.py`, `https.py` | Route `<service>.<worktree>.<domain>` to the right port (WebSockets/HMR included); optionally front with Caddy for TLS. |
-| **Admission** | `admission.py` | A FIFO queue bounded by `max_parallel` and free RAM, so a swarm doesn't melt the box. |
+| **Admission** | `admission.py` | A FIFO queue bounded by `max_parallel`, a live free-RAM reserve (percentage) and a live free-disk headroom (fixed GB); suspends the newest worktree under sustained RAM pressure and resumes it when room returns, so a swarm doesn't melt the box. |
 
 Supporting modules: `config.py` (the `binky.toml` model), `registry.py` + `paths.py`
-(state), `observability.py` (metrics/events), `cli.py` / `init_cmd.py` / `dashboard.py` /
-`mcp.py` (front ends), `daemon.py` / `rpc.py` / `ipc.py` / `ops.py` (the daemon and its
-request handling).
+(state), `settings.py` (machine-global settings — RAM/disk reserves, proxy ports — a small
+JSON store separate from the per-worktree registry), `observability.py` (metrics/events),
+`cli.py` / `init_cmd.py` / `dashboard.py` / `mcp.py` (front ends), `daemon.py` / `rpc.py` /
+`ipc.py` / `ops.py` (the daemon and its request handling).
 
 ## The daemon
 
@@ -47,9 +48,11 @@ request handling).
 - **The event loop is sacred.** Blocking work (SQLite, process I/O) is offloaded with
   `asyncio.to_thread`; only asyncio-touching state (admission waiters, proxy routes) stays
   on the loop. Mixing the two is the bug class to watch for when editing `daemon.py`.
-- **Startup convergence vs. live supervision** are separate: `ops.reconcile` cleans up
-  whatever a previous daemon left behind at startup; `supervisor.tick()` handles exits,
-  restarts, and reclamation *while things run*.
+- **Startup convergence vs. live supervision** are separate: `ops.reconcile` runs once at
+  startup — it *adopts* still-live processes a previous daemon left behind (a restart no
+  longer kills healthy worktrees; adopted processes are supervised for liveness and can be
+  stopped, but aren't restarted/health-probed until the next `up`) and cleans up whatever is
+  actually dead. `supervisor.tick()` handles exits, restarts, and reclamation *while things run*.
 
 ## The registry
 
