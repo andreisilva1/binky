@@ -69,3 +69,50 @@ def test_set_max_parallel_admits() -> None:
         await asyncio.wait_for(waiter, timeout=1)
 
     _run(scenario())
+
+
+def test_rejection_only_fires_when_the_wait_could_never_end() -> None:
+    """A resource floor with nothing running is unsatisfiable → an actionable message.
+    A count block, or a floor while something runs, legitimately queues → None."""
+    # nothing reserved + an impossible disk floor → refuse, with a message that says why
+    ac = AdmissionController(max_parallel=10, min_free_bytes=0, min_free_disk_bytes=10**18)
+    msg = ac.rejection()
+    assert msg is not None
+    assert "disk" in msg
+    assert "binky reserve --disk" in msg  # points at the knob
+
+    # admittable → no refusal
+    ac.min_free_disk_bytes = 0
+    assert ac.rejection() is None
+
+
+def test_rejection_is_silent_while_something_runs() -> None:
+    """With a slot held, a resource shortfall will re-pump on that worktree's release,
+    so it queues rather than refusing — release is the event that can free the resource."""
+
+    async def scenario():
+        ac = AdmissionController(max_parallel=10, min_free_bytes=0, min_free_disk_bytes=0)
+        await ac.acquire()  # hold a slot
+        ac.min_free_disk_bytes = 10**18  # now impossible, but something is running
+        assert ac.rejection() is None  # queues instead of refusing
+
+    _run(scenario())
+
+
+def test_disk_gate() -> None:
+    """A disk reserve blocks admission independently of RAM and capacity: with an
+    impossible free-disk floor nothing is admitted; drop the floor and it flows."""
+
+    async def scenario():
+        # RAM and capacity are wide open, so only the disk floor can block here.
+        ac = AdmissionController(
+            max_parallel=10, min_free_bytes=0, min_free_disk_bytes=10**18
+        )
+        waiter = asyncio.ensure_future(ac.acquire())
+        await asyncio.sleep(0.05)
+        assert not waiter.done()  # blocked on disk
+        ac.min_free_disk_bytes = 0  # 0 disables the disk gate
+        ac.pump()
+        await asyncio.wait_for(waiter, timeout=1)  # now admitted
+
+    _run(scenario())

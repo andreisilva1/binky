@@ -10,7 +10,7 @@ from typing import Annotated
 
 import typer
 
-from binky import __version__, init_cmd, ipc, paths
+from binky import __version__, init_cmd, ipc, paths, settings
 from binky import daemon as _daemon
 from binky.config import ConfigError, config_warnings, load_config
 
@@ -118,6 +118,8 @@ def up(
     for svc in res["services"]:
         tail = f"  :{svc['port']}" if svc.get("port") else ""
         typer.echo(f"  {svc['service']}  pid {svc['pid']}{tail}")
+    for warning in res.get("warnings", []):
+        typer.secho(f"  ⚠ {warning}", fg=typer.colors.YELLOW)
     typer.secho(
         f"✓ up: {res['worktree']} ({len(res['services'])} service(s))", fg=typer.colors.GREEN
     )
@@ -232,7 +234,12 @@ def status(
             else:
                 state = wt["status"]
             vtag = f" · {wt['verify']}" if wt.get("verify") else ""
-            typer.echo(f"  {wt['worktree']}  [{state}{vtag}]")
+            line = f"  {wt['worktree']}  [{state}{vtag}]"
+            # a crash-loop give-up (failed) or a live unhealthy service is an alert, not noise
+            if state in ("failed", "unhealthy"):
+                typer.secho(line, fg=typer.colors.RED)
+            else:
+                typer.echo(line)
             for port in wt["ports"]:
                 label = f".{port['label']}" if port["label"] else ""
                 typer.echo(f"      {port['service']}{label}  :{port['port']}")
@@ -322,6 +329,18 @@ def doctor() -> None:
     line(logs_ok, "log size", _human(logs_size), warn=not logs_ok)
 
     if running:
+        d = ipc.call("doctor")
+        if d["proxy_error"]:
+            line(False, "http proxy", f"not listening on {d['proxy_error']}")
+        elif d["proxy_port"]:
+            line(True, "http proxy", f"listening on :{d['proxy_port']}")
+        else:
+            line(True, "http proxy", "disabled (proxy_port = 0)", warn=True)
+        if d["https_error"]:
+            line(False, "https (Caddy)", d["https_error"], warn=True)
+        elif d["https_active"]:
+            line(True, "https (Caddy)", "active")
+
         m = ipc.call("metrics")
         wt = m["worktrees"]
         typer.echo(
@@ -329,6 +348,101 @@ def doctor() -> None:
             f"{m['ports_allocated']} ports, {m['slices']} slices"
         )
     raise typer.Exit(code=0 if ok else 1)
+
+
+@app.command()
+def gc() -> None:
+    """Sweep orphaned resources a crash left behind (half-provisioned adapter slices)."""
+    if not _daemon.is_running():
+        typer.secho("daemon not running — nothing to collect", fg=typer.colors.YELLOW)
+        return
+    try:
+        res = ipc.call("gc", timeout=120)
+    except ipc.RpcError as exc:
+        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    if not res["count"]:
+        typer.secho("✓ nothing to collect", fg=typer.colors.GREEN)
+        return
+    for item in res["swept"]:
+        typer.echo(f"  swept {item['adapter']} slice for service '{item['service']}'")
+    typer.secho(f"✓ gc: {res['count']} orphan(s) collected", fg=typer.colors.GREEN)
+
+
+@app.command()
+def config() -> None:
+    """Show Binky's machine-global settings (RAM/disk reserves and proxy ports)."""
+    s = settings.load()
+    typer.echo(f"  ram reserve   {s.ram_reserve_pct}% of total RAM kept free")
+    disk = f"{s.disk_reserve_gb} GB kept free" if s.disk_reserve_gb else "off"
+    typer.echo(f"  disk reserve  {disk}")
+    typer.echo(f"  proxy port    {s.proxy_port}" + ("  (disabled)" if not s.proxy_port else ""))
+    typer.echo(f"  https port    {s.https_port}")
+
+
+def _apply_settings(changes: dict, ok_message: str) -> dict:
+    _daemon.ensure()  # a live apply needs the daemon (reserves take effect on the next admit)
+    try:
+        res = ipc.call("settings_set", changes)
+    except ipc.RpcError as exc:
+        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    typer.secho(ok_message.format(**res), fg=typer.colors.GREEN)
+    return res
+
+
+@app.command()
+def reserve(
+    ram: Annotated[
+        int | None, typer.Option("--ram", help="Percent of total RAM to keep free (5-50).")
+    ] = None,
+    disk: Annotated[
+        int | None, typer.Option("--disk", help="GB of disk to always keep free (0 disables).")
+    ] = None,
+) -> None:
+    """Set how much RAM/disk Binky permanently keeps free (raise it to leave the machine more).
+
+    RAM is a percentage of total; disk is a fixed headroom in GB (a percentage of a big disk
+    would demand more free space than a nearly-full disk can ever offer).
+    """
+    changes = {}
+    if ram is not None:
+        changes["ram_reserve_pct"] = ram
+    if disk is not None:
+        changes["disk_reserve_gb"] = disk
+    if not changes:
+        typer.secho(
+            "nothing to set — pass --ram and/or --disk (see `binky config`)",
+            fg=typer.colors.YELLOW,
+        )
+        return
+    _apply_settings(
+        changes, "✓ reserves: {ram_reserve_pct}% RAM, {disk_reserve_gb} GB disk kept free"
+    )
+
+
+@app.command()
+def port(
+    proxy: Annotated[
+        int | None, typer.Option("--proxy", help="HTTP proxy port (0 disables hostname routing).")
+    ] = None,
+    https: Annotated[int | None, typer.Option("--https", help="HTTPS (Caddy) port.")] = None,
+) -> None:
+    """Set the proxy/HTTPS ports (takes effect on the next daemon restart)."""
+    changes = {}
+    if proxy is not None:
+        changes["proxy_port"] = proxy
+    if https is not None:
+        changes["https_port"] = https
+    if not changes:
+        typer.secho("nothing to set — pass --proxy and/or --https", fg=typer.colors.YELLOW)
+        return
+    res = _apply_settings(changes, "✓ ports: proxy {proxy_port}, https {https_port}")
+    if res.get("restart_required"):
+        typer.secho(
+            "  ⚠ restart the daemon to bind the new port: `binky daemon restart`",
+            fg=typer.colors.YELLOW,
+        )
 
 
 @app.command()
@@ -373,6 +487,14 @@ def stop() -> None:
         typer.secho("✓ daemon stopped", fg=typer.colors.GREEN)
     else:
         typer.secho("daemon was not running", fg=typer.colors.YELLOW)
+
+
+@daemon_app.command()
+def restart() -> None:
+    """Restart the Binky daemon (e.g. to bind a changed proxy/https port)."""
+    _daemon.stop()
+    _daemon.start()
+    typer.secho("✓ daemon restarted", fg=typer.colors.GREEN)
 
 
 @daemon_app.command("status")

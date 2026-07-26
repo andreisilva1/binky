@@ -79,15 +79,14 @@ class Project(_Base):
     name: str
     domain: str | None = None  # None → derived as "<name>.localhost" at runtime
     port_range: tuple[int, int] | None = None
-    max_parallel: int | None = None  # None → derived from machine RAM
     https: bool = False  # front the proxy with Caddy (TLS via a local CA) when available
 
     @model_validator(mode="after")
     def _valid_range(self) -> Project:
+        # RAM/disk limits are machine-global (a singleton daemon), not per-project — they
+        # live in the settings store (`binky reserve`), never in a project's binky.toml.
         if self.port_range and self.port_range[0] >= self.port_range[1]:
             raise ValueError("port_range must be [low, high] with low < high")
-        if self.max_parallel is not None and self.max_parallel < 1:
-            raise ValueError("max_parallel must be >= 1")
         return self
 
 

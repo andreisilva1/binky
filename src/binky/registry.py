@@ -49,6 +49,8 @@ class WorktreeStatus(StrEnum):
     provisioning = "provisioning"
     ready = "ready"
     stopped = "stopped"  # paused via `binky down` — the reconciler must not GC these
+    failed = "failed"  # crash-looped past give-up — distinct from an intentional `down`
+    suspended = "suspended"  # paused by the daemon under RAM pressure; resumes itself (C2)
 
 
 class SliceStatus(StrEnum):
@@ -350,6 +352,22 @@ class Registry:
 
     def delete_slice(self, slice_id: int) -> None:
         self._conn.execute("DELETE FROM slices WHERE id=?", (slice_id,))
+
+    def now(self) -> int:
+        """The registry's own clock (epoch seconds) — the one `created_at`/`updated_at`
+        are stamped with, so age comparisons stay on a single timebase."""
+        return _now()
+
+    def stale_provisioning_slices(self, before_ts: int) -> list[Slice]:
+        """`provisioning` slices last touched at or before *before_ts* — a write-ahead
+        trail (see ops._provision_adapters) left by a crash between recording the intent
+        and the resource becoming ready. `gc` sweeps these; the TTL keeps it from racing
+        an `up` that is legitimately mid-provision right now."""
+        rows = self._conn.execute(
+            "SELECT * FROM slices WHERE status=? AND updated_at<=? ORDER BY updated_at",
+            (SliceStatus.provisioning.value, before_ts),
+        ).fetchall()
+        return [_slice(r) for r in rows]
 
     # -- processes (PIDs, for reconcile after a daemon restart) ------------ #
     def add_process(self, worktree_id: int, pid: int, create_time: float | None = None) -> None:

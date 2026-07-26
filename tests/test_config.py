@@ -11,7 +11,6 @@ VALID = """
 name = "acme"
 domain = "acme.localhost"
 port_range = [4000, 4999]
-max_parallel = 6
 
 [defaults]
 restart = "on-failure"
