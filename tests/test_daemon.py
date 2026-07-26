@@ -6,6 +6,7 @@ import os
 import stat
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -38,6 +39,19 @@ def _seed_slotted(d: daemon.Daemon, project: str, name: str, token: int):
     d._slots[(project, name)] = token
     d._up_params[(project, name)] = {"root": f"/tmp/{name}", "worktree": name}
     return wt
+
+def _write_url_config(path: Path) -> None:
+    """A minimal project with one `url` service, so a route can be rebuilt from it."""
+    path.mkdir(parents=True, exist_ok=True)
+    (path / "binky.toml").write_text(
+        '[project]\n'
+        'name = "demo"\n'
+        '[services.web]\n'
+        "cmd = 'python -c \"pass\"'\n"
+        'url = "web"\n',
+        encoding="utf-8",
+    )
+
 
 unix_only = pytest.mark.skipif(os.name == "nt", reason="Windows uses a loopback TCP port")
 
@@ -401,6 +415,79 @@ def test_taking_a_suspended_worktree_down_cancels_its_pending_resume() -> None:
         assert out["done"]  # the parked waiter stopped
         assert not out["tasks"]  # and was forgotten
         assert not out["params"]  # along with its resume context
+    finally:
+        d.registry.close()
+
+
+def test_adopt_state_rebuilds_routes_slot_and_resume_context(tmp_path: Path) -> None:
+    """C3 + I6: after `reconcile` adopts a still-live worktree, the daemon must rebuild the
+    in-memory state a normal `up` produces — proxy routes, admission slot, resume context — or
+    the process survives the restart but comes back unreachable (dead hostnames) and uncounted."""
+    d = daemon.Daemon()
+    try:
+        wt_path = tmp_path / "checkout"
+        _write_url_config(wt_path)
+        wt = d.registry.create_worktree(
+            "demo", "feat", str(wt_path), "feat", status=WorktreeStatus.ready
+        )
+        d.registry.allocate_port(wt.id, "web", "", 4700)
+        d.registry.set_up_params(
+            wt.id, {"root": str(wt_path), "worktree": "feat", "group": None}
+        )
+        d.procman = _FakeProcman({wt.id})  # reconcile just adopted it → reports running
+
+        d._adopt_state()
+
+        assert d.routes == {"web.feat.demo.localhost": 4700}  # hostname routing restored
+        assert ("demo", "feat") in d._slots  # admission slot restored...
+        assert d.admission.in_use == 1  # ...and counted, so the next `up` can't over-admit
+        assert d._up_params[("demo", "feat")]["worktree"] == "feat"  # resume context restored
+    finally:
+        d.registry.close()
+
+
+def test_adopt_state_ignores_worktrees_not_actually_running(tmp_path: Path) -> None:
+    """Only worktrees `reconcile` truly adopted (ready + live) get state rebuilt; a `ready`
+    row whose processes are gone (reconcile would drop it to `stopped`) must not be routed."""
+    d = daemon.Daemon()
+    try:
+        wt_path = tmp_path / "checkout"
+        _write_url_config(wt_path)
+        wt = d.registry.create_worktree(
+            "demo", "feat", str(wt_path), "feat", status=WorktreeStatus.ready
+        )
+        d.registry.allocate_port(wt.id, "web", "", 4700)
+        d.procman = _FakeProcman(set())  # nothing alive to adopt
+
+        d._adopt_state()
+
+        assert d.routes == {}
+        assert d._slots == {}
+        assert d.admission.in_use == 0
+    finally:
+        d.registry.close()
+
+
+def test_repair_routes_reinstalls_missing_routes_only(tmp_path: Path) -> None:
+    """The idempotent safety net: `up` on an already-up worktree heals *missing* routes but
+    never clobbers routes that are already installed."""
+    d = daemon.Daemon()
+    try:
+        wt_path = tmp_path / "checkout"
+        _write_url_config(wt_path)
+        wt = d.registry.create_worktree(
+            "demo", "feat", str(wt_path), "feat", status=WorktreeStatus.ready
+        )
+        d.registry.allocate_port(wt.id, "web", "", 4700)
+        params = {"root": str(wt_path), "worktree": "feat"}
+
+        d._repair_routes(params)  # routes were missing → installed
+        assert d.routes == {"web.feat.demo.localhost": 4700}
+
+        d._routes_by_wt[("demo", "feat")] = {"sentinel.host": 9999}  # pretend already routed
+        d._rebuild_routes()
+        d._repair_routes(params)
+        assert d.routes == {"sentinel.host": 9999}  # untouched — it already had routes
     finally:
         d.registry.close()
 

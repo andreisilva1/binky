@@ -45,6 +45,21 @@ def test_fifo_order() -> None:
     _run(scenario())
 
 
+def test_readmit_occupies_without_gating() -> None:
+    """`readmit` accounts for already-running work adopted on a daemon restart (C3): it takes
+    a slot even past capacity / under an impossible RAM floor (refusing wouldn't stop the
+    processes — it would only let the next `up` over-admit), and the slot releases normally."""
+    ac = AdmissionController(max_parallel=1, min_free_bytes=10**18)  # full and RAM-blocked
+    assert ac.rejection() is None or ac.in_use == 0
+    token = ac.readmit()  # accounts for a running-but-unslotted adopted worktree
+    assert ac.in_use == 1  # counted despite being over capacity and under the RAM floor
+    second = ac.readmit()  # a second adopted worktree
+    assert ac.in_use == 2 and second != token  # distinct tokens
+    ac.release(token)
+    ac.release(second)
+    assert ac.in_use == 0  # released like any other slot
+
+
 def test_ram_gate() -> None:
     async def scenario():
         ac = AdmissionController(max_parallel=10, min_free_bytes=10**18)  # impossible RAM req

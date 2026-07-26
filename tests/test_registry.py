@@ -19,7 +19,7 @@ def test_wal_and_schema_version(reg: Registry) -> None:
     mode = reg._conn.execute("PRAGMA journal_mode").fetchone()[0]
     assert mode == "wal"
     ver = reg._conn.execute("PRAGMA user_version").fetchone()[0]
-    assert ver == 3
+    assert ver == 4
 
 
 def test_create_and_get_worktree(reg: Registry) -> None:
@@ -140,7 +140,7 @@ def test_default_db_path_respects_binky_home(tmp_path: Path, monkeypatch) -> Non
 def test_fresh_db_is_at_current_schema(tmp_path: Path) -> None:
     reg = Registry.connect(tmp_path / "binky.db")
     version = reg._conn.execute("PRAGMA user_version").fetchone()[0]
-    assert version == 3
+    assert version == 4
     reg.close()
 
 
@@ -158,8 +158,9 @@ def test_migrates_legacy_v1_database(tmp_path: Path) -> None:
 
     reg = Registry.connect(db)
     columns = {row[1] for row in reg._conn.execute("PRAGMA table_info(worktrees)")}
-    assert "verify_status" in columns  # migration added it
-    assert reg._conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert "verify_status" in columns  # v2 migration added it
+    assert "up_params" in columns  # ...and the chain ran on through v4
+    assert reg._conn.execute("PRAGMA user_version").fetchone()[0] == 4
     reg.close()
 
 
@@ -180,5 +181,40 @@ def test_migrates_legacy_v2_database(tmp_path: Path) -> None:
     reg = Registry.connect(db)
     columns = {row[1] for row in reg._conn.execute("PRAGMA table_info(processes)")}
     assert "create_time" in columns  # migration added it
-    assert reg._conn.execute("PRAGMA user_version").fetchone()[0] == 3
+    assert reg._conn.execute("PRAGMA user_version").fetchone()[0] == 4
     reg.close()
+
+
+def test_migrates_legacy_v3_database(tmp_path: Path) -> None:
+    """A v3 registry (worktrees without up_params) gains the resume-context column in place."""
+    db = tmp_path / "binky.db"
+    legacy = sqlite3.connect(db)
+    legacy.executescript(
+        "CREATE TABLE worktrees (id INTEGER PRIMARY KEY, project TEXT, name TEXT, path TEXT,"
+        " branch TEXT, status TEXT, created_at INTEGER, updated_at INTEGER, verify_status TEXT,"
+        " UNIQUE(project, name));"
+    )
+    legacy.execute("PRAGMA user_version=3")
+    legacy.commit()
+    legacy.close()
+
+    reg = Registry.connect(db)
+    columns = {row[1] for row in reg._conn.execute("PRAGMA table_info(worktrees)")}
+    assert "up_params" in columns  # migration added it
+    assert reg._conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    reg.close()
+
+
+def test_up_params_roundtrip(reg: Registry) -> None:
+    """The JSON `up` args persist and re-hydrate as a dict, so a restarted daemon can rebuild
+    an adopted worktree's resume context (C2/C3); absent, they read back as None."""
+    wt = reg.create_worktree("acme", "a", "/wt/a", "a")
+    assert reg.get_worktree("acme", "a").up_params is None  # never set → None
+
+    params = {"root": "/wt/a", "worktree": "a", "group": "web"}
+    reg.set_up_params(wt.id, params)
+    assert reg.get_worktree("acme", "a").up_params == params  # round-trips as a dict
+    assert reg.list_worktrees()[0].up_params == params  # ...on the list path too
+
+    reg.set_up_params(wt.id, None)  # clearable
+    assert reg.get_worktree("acme", "a").up_params is None

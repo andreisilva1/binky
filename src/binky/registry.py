@@ -11,6 +11,7 @@ Thin, typed data-access layer over stdlib ``sqlite3`` — no ORM.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import threading
 import time
@@ -22,7 +23,7 @@ from pathlib import Path
 
 from binky import paths, procs
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _migrate_2_verify_status(conn: sqlite3.Connection) -> None:
@@ -40,9 +41,22 @@ def _migrate_3_process_identity(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE processes ADD COLUMN create_time REAL")
 
 
+def _migrate_4_up_params(conn: sqlite3.Connection) -> None:
+    """v3 → v4: add worktrees.up_params — the JSON ``up`` args — so a restarted daemon can
+    restore the C2 resume context of a worktree it adopts (C3), instead of leaving that state
+    stranded in the dead daemon's memory (idempotent — fresh DBs already have it)."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(worktrees)")}
+    if "up_params" not in columns:
+        conn.execute("ALTER TABLE worktrees ADD COLUMN up_params TEXT")
+
+
 # version -> upgrade step. Applied in order for any DB below SCHEMA_VERSION, so a
 # Binky upgrade never strands an existing registry. Steps must be idempotent.
-_MIGRATIONS = {2: _migrate_2_verify_status, 3: _migrate_3_process_identity}
+_MIGRATIONS = {
+    2: _migrate_2_verify_status,
+    3: _migrate_3_process_identity,
+    4: _migrate_4_up_params,
+}
 
 
 class WorktreeStatus(StrEnum):
@@ -69,6 +83,7 @@ class Worktree:
     created_at: int
     updated_at: int
     verify_status: str | None = None  # None → never verified; else "passing"/"failing"
+    up_params: dict | None = None  # the JSON `up` args, so an adopted worktree can resume (C2/C3)
 
 
 @dataclass(frozen=True)
@@ -101,6 +116,7 @@ CREATE TABLE IF NOT EXISTS worktrees (
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL,
     verify_status TEXT,
+    up_params TEXT,
     UNIQUE (project, name)
 );
 
@@ -287,6 +303,14 @@ class Registry:
             (verify_status, _now(), worktree_id),
         )
 
+    def set_up_params(self, worktree_id: int, params: dict | None) -> None:
+        """Persist the JSON ``up`` args for a worktree so a daemon that later adopts it (C3)
+        can rebuild the resume context (C2) that otherwise lived only in daemon memory."""
+        self._conn.execute(
+            "UPDATE worktrees SET up_params=?, updated_at=? WHERE id=?",
+            (json.dumps(params) if params is not None else None, _now(), worktree_id),
+        )
+
     def delete_worktree(self, worktree_id: int) -> None:
         # cascades to ports + slices
         self._conn.execute("DELETE FROM worktrees WHERE id=?", (worktree_id,))
@@ -398,9 +422,11 @@ class Registry:
 
 
 def _worktree(row: sqlite3.Row) -> Worktree:
+    raw = row["up_params"]
     return Worktree(
         row["id"], row["project"], row["name"], row["path"], row["branch"],
         row["status"], row["created_at"], row["updated_at"], row["verify_status"],
+        json.loads(raw) if raw else None,
     )
 
 

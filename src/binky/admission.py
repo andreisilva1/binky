@@ -152,6 +152,20 @@ class AdmissionController:
         self._reserved.discard(token)
         self.pump()
 
+    def readmit(self) -> int:
+        """Occupy a slot for a worktree that is *already running* — one adopted from a
+        previous daemon on restart (C3) — without waiting or gating on capacity.
+
+        This records reality; it does not admit new work. The processes already exist and
+        already consume the RAM, so refusing (as :meth:`acquire` would when over capacity)
+        wouldn't stop them — it would only make the accounting undercount and let the next
+        ``up`` over-admit past ``max_parallel``. Returns the token to :meth:`release` later,
+        exactly like :meth:`acquire`. No ``pump``: taking a slot only lowers free capacity."""
+        self._next += 1
+        token = self._next
+        self._reserved.add(token)
+        return token
+
     def set_max_parallel(self, value: int) -> None:
         self.max_parallel = max(1, value)
         self.pump()

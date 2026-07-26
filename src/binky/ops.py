@@ -554,6 +554,10 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             )
 
         reg.set_worktree_status(wt.id, WorktreeStatus.ready)
+        # Persist the resume context so a daemon that later adopts this worktree (C3) can
+        # rebuild what a pressure-suspend needs to bring it back (C2) — otherwise that lives
+        # only in the daemon's memory and dies with it.
+        reg.set_up_params(wt.id, params)
         if cfg.hooks:
             _run_lifecycle_hook(cfg.hooks.post_up, wt.path, name)
         return {

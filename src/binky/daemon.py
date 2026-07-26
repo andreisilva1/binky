@@ -57,6 +57,11 @@ class Daemon:
         # Adopt any still-live worktrees a previous daemon left running, and clean up the
         # rest (C3). Needs procman (built above) so adoption has somewhere to register.
         ops.reconcile(self.registry, self.procman)
+        # reconcile re-supervises the adopted *processes* and rewrites the registry rows, but
+        # the routing/admission/resume tables live only in this process and are otherwise
+        # populated solely by `up`. Rebuild them for the adopted worktrees so they come back
+        # reachable and correctly accounted for, not stranded "running" with dead hostnames.
+        self._adopt_state()
         self.router = rpc.Router()
         self.router.add("ping", self._ping)
         self.router.add("shutdown", self._shutdown)
@@ -112,8 +117,13 @@ class Daemon:
             try:
                 # off the event loop: wait_healthy / migrate must not block other requests
                 result = await asyncio.to_thread(ops.up, self.registry, self.procman, params)
-            except BaseException:
+            except BaseException as exc:
                 self.admission.release(token)
+                # A worktree that's already up but lost its routes (a C3 adoption whose boot
+                # rebuild couldn't run) would otherwise stay unreachable and `up` would just
+                # refuse. Heal the routes before surfacing the error — the signal is unchanged.
+                if isinstance(exc, rpc.RpcFault) and exc.code == "already_up":
+                    self._repair_routes(params)
                 raise
             key = (result["project"], result["worktree"])
             self._slots[key] = token
@@ -209,6 +219,54 @@ class Daemon:
         self.routes = {
             host: port for routes in self._routes_by_wt.values() for host, port in routes.items()
         }
+
+    def _rebuild_wt_routes(self, wt, group: str | None = None) -> None:
+        """Recompute one worktree's proxy routes from the registry + its checked-out config,
+        into ``_routes_by_wt`` (the caller flattens with ``_rebuild_routes``). Best-effort: a
+        config that won't load leaves the worktree without routes rather than raising. The
+        config is read from ``wt.path`` — ``binky.toml`` is versioned, so the worktree checkout
+        always has it, and it reflects that worktree's own config."""
+        with contextlib.suppress(Exception):
+            cfg = ops._load(wt.path)
+            services = ops._select_services(cfg, group)
+            ports = {(p.service, p.label): p.port for p in self.registry.ports_for(wt.id)}
+            self._routes_by_wt[(wt.project, wt.name)] = ops._routes(
+                cfg, wt.name, ports, services
+            )
+
+    def _adopt_state(self) -> None:
+        """Rebuild the daemon-side state for worktrees ``reconcile`` just adopted (C3).
+
+        An adopted worktree is one that survived the restart still ``ready`` with live,
+        now-supervised processes. For each, restore what a normal ``up`` would have put in
+        this process's memory: the admission slot (so capacity accounting matches reality and
+        the next ``up`` can't over-admit), the resume context (so a pressure-suspend can still
+        bring it back — C2), and the proxy routes (so its hostnames resolve again). Without
+        this the process survives the restart but comes back unreachable and uncounted."""
+        for wt in self.registry.list_worktrees():
+            if wt.status != WorktreeStatus.ready or not self.procman.is_running(wt.id):
+                continue
+            key = (wt.project, wt.name)
+            self._slots[key] = self.admission.readmit()
+            if wt.up_params:
+                self._up_params[key] = wt.up_params
+            self._rebuild_wt_routes(wt, wt.up_params.get("group") if wt.up_params else None)
+        self._rebuild_routes()
+
+    def _repair_routes(self, params: dict) -> None:
+        """Idempotent safety net: re-install a running worktree's routes if they're missing.
+
+        The primary rebuild happens at boot (``_adopt_state``); this catches the rare case
+        where that couldn't run (e.g. the config was briefly unloadable then) and the user
+        retries ``up`` — which otherwise just refuses "already up" and leaves the hostnames
+        dead. We only touch a worktree with *no* routes, so a normally-routed one is untouched."""
+        with contextlib.suppress(Exception):
+            cfg = ops._load(params.get("root"))
+            wt = self.registry.get_worktree(cfg.project.name, params.get("worktree"))
+            if wt is None or (wt.project, wt.name) in self._routes_by_wt:
+                return
+            self._rebuild_wt_routes(wt, params.get("group"))
+            self._rebuild_routes()
 
     async def _pump_loop(self) -> None:
         with contextlib.suppress(asyncio.CancelledError):
