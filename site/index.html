@@ -20,6 +20,7 @@
     <nav class="nav-links">
       <a href="#what" class="hide-sm">What it is</a>
       <a href="#use" class="hide-sm">Usage</a>
+      <a href="#demo" class="hide-sm">Demo</a>
       <a href="#adapters" class="hide-sm">Adapters</a>
       <a href="./docs.html">Docs</a>
       <a href="https://github.com/andreisilva1/binky" class="gh" rel="noopener">GitHub&nbsp;↗</a>
@@ -247,33 +248,33 @@
 
             <!-- 4 · up (pids/ports illustrative; line format is real) -->
             <div class="demo-screen" data-tab="bash">
-<pre><code class="term"><span class="term-cmd"><span class="prompt">$</span> <span class="cmd">binky up login-fix</span></span><span class="term-body">
+<pre><code class="term"><span class="term-cmd"><span class="prompt">$</span> <span class="cmd">binky up &lt;your-branch-name&gt;</span></span><span class="term-body">
 <span class="tok-out">  db  pid 48213
   api  pid 48217  :41003
   web  pid 48219  :41005</span>
-<span class="tok-ok">✓ up: login-fix (3 service(s))</span></span></code></pre>
+<span class="tok-ok">✓ up: &lt;your-branch-name&gt; (3 service(s))</span></span></code></pre>
             </div>
 
             <!-- 5 · a second worktree, in parallel + status -->
             <div class="demo-screen" data-tab="bash">
-<pre><code class="term"><span class="term-cmd"><span class="prompt">$</span> <span class="cmd">binky up checkout-v2</span></span><span class="term-body">   <span class="tok-cmt"># a second branch, in parallel</span>
-<span class="tok-ok">✓ up: checkout-v2 (3 service(s))</span>
+<pre><code class="term"><span class="term-cmd"><span class="prompt">$</span> <span class="cmd">binky up &lt;another-branch-name&gt;</span></span><span class="term-body">   <span class="tok-cmt"># a second branch, in parallel</span>
+<span class="tok-ok">✓ up: &lt;another-branch-name&gt; (3 service(s))</span>
 <span class="term-cmd"><span class="prompt">$</span> binky status</span>
 <b class="tok-proj">acme</b>
-<span class="tok-out">  checkout-v2  [running]
+<span class="tok-out">  &lt;another-branch-name&gt;  [running]
       api  :41013
       web  :41015
-  login-fix  [running]
+  &lt;your-branch-name&gt;  [running]
       api  :41003
       web  :41005</span></span></code></pre>
             </div>
 
             <!-- 6 · hand it to an agent -->
             <div class="demo-screen" data-tab="bash">
-<pre><code class="term"><span class="term-cmd"><span class="prompt">$</span> <span class="cmd">binky env login-fix</span></span><span class="term-body">
-<span class="tok-out">{"web": "http://web.login-fix.acme.localhost",
+<pre><code class="term"><span class="term-cmd"><span class="prompt">$</span> <span class="cmd">binky env &lt;your-branch-name&gt;</span></span><span class="term-body">
+<span class="tok-out">{"web": "http://web.&lt;your-branch-name&gt;.acme.localhost",
  "api": "http://localhost:41003",
- "db":  "postgresql://…/acme_login_fix"}</span></span></code></pre>
+ "db":  "postgresql://…/acme_&lt;your-branch-name&gt;"}</span></span></code></pre>
             </div>
 
           </div>
