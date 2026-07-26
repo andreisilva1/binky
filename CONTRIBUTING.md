@@ -86,8 +86,3 @@ Keep PRs focused. A good PR:
 
 Working on the daemon, the port allocator, admission, or an adapter? Start with
 [ARCHITECTURE.md](ARCHITECTURE.md) for a map of how the pieces fit together.
-
-## A note on `development/`
-
-The `development/` directory is git-ignored and holds local-only planning material. You
-won't see it upstream and don't need it to contribute.
