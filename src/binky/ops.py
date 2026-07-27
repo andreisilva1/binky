@@ -289,6 +289,45 @@ def env(reg: Registry, params: dict) -> dict:
     return {"project": cfg.project.name, "worktree": name, "env": coords}
 
 
+def resolve_route(reg: Registry, params: dict) -> dict:
+    """Resolve a ``url`` service's proxy hostname for ``binky curl``.
+
+    Unlike ``env`` (which only reports ``[agents] expose`` services), this resolves *any*
+    service that has a ``url`` — the whole point is to reach it through the proxy. Returns the
+    ``<sub>.<worktree>.<domain>`` Host the proxy routes on, the scheme, and the service's own
+    direct port (handy for error messages). The daemon supplies the proxy *port* on top, since
+    only it knows where the proxy is actually listening.
+    """
+    name = params.get("worktree")
+    service = params.get("service")
+    if not name or not service:
+        raise RpcFault("bad_request", "missing 'worktree' or 'service'")
+    cfg = _load(params.get("root"))
+    wt = reg.get_worktree(cfg.project.name, name)
+    if wt is None:
+        raise RpcFault("not_found", f"no worktree '{name}'")
+    svc = cfg.services.get(service)
+    if svc is None:
+        raise RpcFault("not_found", f"no service '{service}' in project '{cfg.project.name}'")
+    sub, label = _url_target(service, svc)
+    if sub is None:
+        raise RpcFault(
+            "no_route",
+            f"service '{service}' has no `url` — nothing to route through the proxy",
+        )
+    domain = cfg.project.domain or f"{cfg.project.name}.localhost"
+    ports = {(p.service, p.label): p.port for p in reg.ports_for(wt.id)}
+    direct = ports.get((service, label)) if label else resolve.primary_port(ports, service)
+    return {
+        "project": cfg.project.name,
+        "worktree": name,
+        "service": service,
+        "host": f"{sub}.{name}.{domain}",
+        "scheme": "https" if cfg.project.https else "http",
+        "direct_port": direct,
+    }
+
+
 def verify(reg: Registry, procman: ProcessManager, params: dict) -> dict:
     """Run ``[agents] verify`` against the live worktree and record the verdict.
 

@@ -73,6 +73,7 @@ class Daemon:
         self.router.add("status", self._status)
         self.router.add("verify", self._verify)
         self.router.add("env", self._env)
+        self.router.add("route", self._route)
         self.router.add("metrics", self._metrics)
         self.router.add("doctor", self._doctor)
         self.router.add("gc", self._gc)
@@ -431,6 +432,14 @@ class Daemon:
 
     async def _env(self, params: dict) -> dict:
         return await asyncio.to_thread(ops.env, self.registry, params)
+
+    async def _route(self, params: dict) -> dict:
+        # ops resolves the Host from config + registry; only the daemon knows where the proxy
+        # is actually listening, so it stamps the port (and any bind error) on the way out.
+        res = await asyncio.to_thread(ops.resolve_route, self.registry, params)
+        res["proxy_port"] = self._proxy_port
+        res["proxy_error"] = self._proxy_error
+        return res
 
     async def _metrics(self, _params: dict) -> dict:
         return await asyncio.to_thread(

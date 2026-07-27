@@ -207,6 +207,90 @@ def env(
 
 
 @app.command()
+def curl(
+    worktree: Annotated[str, typer.Argument(help="Worktree the service lives in.")],
+    service: Annotated[str, typer.Argument(help="Service to reach (must have a `url`).")],
+    path: Annotated[str, typer.Argument(help="Request path, e.g. /tasks.")] = "/",
+    method: Annotated[str, typer.Option("-X", "--request", help="HTTP method.")] = "GET",
+    data: Annotated[
+        str, typer.Option("-d", "--data", help="Request body (JSON content-type by default).")
+    ] = "",
+    header: Annotated[
+        list[str], typer.Option("-H", "--header", help="Extra 'Name: value' header (repeatable).")
+    ] = None,
+    include: Annotated[
+        bool, typer.Option("-i", "--include", help="Print the status line and response headers.")
+    ] = False,
+    fail: Annotated[
+        bool, typer.Option("-f", "--fail", help="Exit non-zero on a >= 400 response.")
+    ] = False,
+) -> None:
+    """Call a worktree's service through the proxy, with the right Host header filled in.
+
+    `*.localhost` names resolve in browsers but not from the Windows CLI, so hitting a service
+    by hostname there needs a manual `127.0.0.1:<proxy>` + `Host:` dance. This does it for you:
+    it asks the daemon for the service's route and dials the proxy on your behalf.
+    """
+    import http.client
+
+    if not _daemon.is_running():
+        typer.secho("daemon not running", fg=typer.colors.YELLOW)
+        raise typer.Exit(code=1)
+    try:
+        route = ipc.call("route", {"root": str(Path.cwd()), "worktree": worktree, "service": service})
+    except ipc.RpcError as exc:
+        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    proxy_port = route.get("proxy_port") or 0
+    if proxy_port <= 0:
+        detail = route.get("proxy_error") or "proxy_port = 0"
+        typer.secho(f"✗ http proxy isn't listening ({detail})", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    headers = {"Host": route["host"]}
+    for raw_header in header or []:
+        if ":" not in raw_header:
+            typer.secho(f"✗ bad header '{raw_header}' — expected 'Name: value'", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1)
+        key, value = raw_header.split(":", 1)
+        headers[key.strip()] = value.strip()
+    body = data.encode("utf-8") if data else None
+    if body is not None and not any(k.lower() == "content-type" for k in headers):
+        headers["Content-Type"] = "application/json"  # the common case here is a JSON API
+
+    target = path if path.startswith("/") else f"/{path}"
+    conn = http.client.HTTPConnection("127.0.0.1", proxy_port, timeout=30)
+    try:
+        conn.request(method.upper(), target, body=body, headers=headers)
+        resp = conn.getresponse()
+        payload = resp.read()
+    except http.client.InvalidURL as exc:
+        # a path with spaces/control chars never leaves the client — call it out plainly
+        typer.secho(f"✗ invalid request path {target!r} — {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    except (OSError, http.client.HTTPException) as exc:
+        typer.secho(
+            f"✗ couldn't reach {route['host']} via the proxy on :{proxy_port} — "
+            f"is '{worktree}' up? ({exc})",
+            fg=typer.colors.RED, err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    finally:
+        conn.close()
+
+    color = typer.colors.GREEN if resp.status < 400 else typer.colors.RED
+    typer.secho(f"HTTP {resp.status} {resp.reason}", fg=color, err=True)
+    if include:
+        for key, value in resp.getheaders():
+            typer.echo(f"{key}: {value}")
+        typer.echo("")
+    typer.echo(payload.decode("utf-8", errors="replace"))
+    if fail and resp.status >= 400:
+        raise typer.Exit(code=1)
+
+
+@app.command()
 def status(
     scope: Annotated[str, typer.Argument(help='"." to show only the current project')] = "",
 ) -> None:
