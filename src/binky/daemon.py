@@ -600,7 +600,12 @@ class Daemon:
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
-            self.procman.stop_all()
+            # Deliberately do NOT stop the worktree processes here. The daemon exiting is
+            # not a signal to tear down running work: `binky daemon stop`/`restart` must
+            # leave worktrees alive so the next daemon *adopts* them on the way back up
+            # (C3) — the documented "worktrees keep running; the daemon reconciles them"
+            # contract. Children are spawned in their own session/process group precisely
+            # so they survive our exit; `down`/`remove` are the verbs that stop a worktree.
             self.registry.close()
 
 

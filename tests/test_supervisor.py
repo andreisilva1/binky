@@ -12,7 +12,14 @@ from pathlib import Path
 import pytest
 
 from binky import supervisor
-from binky.supervisor import _GIVE_UP_AFTER, _LOG_KEEP, _LOG_MAX_BYTES, ProcessManager, _rotate_log
+from binky.supervisor import (
+    _GIVE_UP_AFTER,
+    _LOG_KEEP,
+    _LOG_MAX_BYTES,
+    _STABLE_RESET,
+    ProcessManager,
+    _rotate_log,
+)
 
 posix_only = pytest.mark.skipif(
     os.name == "nt",
@@ -122,6 +129,33 @@ def test_gives_up_after_cap(tmp_path: Path) -> None:
     assert 1 in report.worktrees_down
     assert 1 in report.failed  # crash-loop give-up is a *failure*, not a clean stop
     assert not report.restarted
+
+
+def test_restart_counter_resets_after_a_stable_run(tmp_path: Path) -> None:
+    """A service that crashes, is restarted, then runs stably past ``_STABLE_RESET`` has its
+    restart counter cleared — so crashes spaced further apart than that window never accumulate
+    toward the give-up cap. This is why a long-lived service survives repeated, *spaced* kills
+    instead of being retired as a crash loop."""
+    marker = tmp_path / "started.once"
+    body = (
+        "import os, sys, time\n"
+        f"m = r'{marker}'\n"
+        "if not os.path.exists(m):\n"
+        "    open(m, 'w').close(); sys.exit(1)\n"  # first run crashes
+        "time.sleep(300)\n"  # every run after finds the marker and stays alive
+    )
+    pm = ProcessManager()
+    _start(pm, tmp_path, _script(tmp_path, "flaky.py", body), restart="always")
+    assert _wait_exit(pm, 1)  # first run crashed
+
+    now = 1000.0
+    report = pm.tick(now)  # respawn #1 — this run finds the marker and sleeps
+    assert (1, "svc") in report.restarted
+    assert pm._procs[1][0].restarts == 1
+
+    pm.tick(now + _STABLE_RESET)  # alive across the stable window → counter clears
+    assert pm._procs[1][0].restarts == 0
+    pm.stop(1)
 
 
 def test_clean_reclaim_is_not_flagged_failed(tmp_path: Path) -> None:

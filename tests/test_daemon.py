@@ -493,6 +493,33 @@ def test_adopt_state_ignores_worktrees_not_actually_running(tmp_path: Path) -> N
         d.registry.close()
 
 
+def test_daemon_shutdown_leaves_worktree_processes_running_for_adoption(tmp_path: Path) -> None:
+    """A daemon shutting down must NOT kill the worktrees it supervises: `daemon stop`/
+    `restart` leaves them alive so the *next* daemon adopts them (C3), the documented
+    "worktrees keep running; the daemon reconciles them on the way back up" contract.
+
+    Regression for a stale `procman.stop_all()` in the shutdown path (predating C3) that
+    tore down every running worktree on each graceful restart — reconcile then found
+    nothing live to adopt and dropped them all to `stopped`.
+    """
+    import sys
+
+    d = daemon.Daemon()
+    script = tmp_path / "svc.py"
+    script.write_text("import time; time.sleep(300)", encoding="utf-8")
+    cmd = f'"{sys.executable}" "{script}"'
+    d.procman.start(1, "svc", cmd, str(tmp_path), {}, tmp_path / "svc.log", restart="never")
+    assert d.procman.is_running(1)
+
+    d._stop.set()  # tell serve() to shut down the instant it has finished starting
+    try:
+        asyncio.run(d.serve())
+        # survived the daemon's own exit — still there for the next daemon to adopt
+        assert d.procman.is_running(1)
+    finally:
+        d.procman.stop(1)  # this test owns the child; never leak it past the test
+
+
 def test_repair_routes_reinstalls_missing_routes_only(tmp_path: Path) -> None:
     """The idempotent safety net: `up` on an already-up worktree heals *missing* routes but
     never clobbers routes that are already installed."""
