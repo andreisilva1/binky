@@ -411,9 +411,15 @@ class Daemon:
         must never freeze the proxy and RPC. Only the admission/route bookkeeping,
         which touches asyncio primitives, stays on the loop.
         """
-        downed = await asyncio.to_thread(self._sync_registry, report)
+        downed, restart_names = await asyncio.to_thread(self._sync_registry, report)
         for wt_id, service in report.restarted:
-            observability.log_event("restart", worktree_id=wt_id, service=service)
+            name = restart_names.get(wt_id)
+            if name is not None:
+                observability.log_event(
+                    "restart", project=name[0], worktree=name[1], service=service
+                )
+            else:  # the row vanished between tick and read — still record it, keyed by id
+                observability.log_event("restart", worktree_id=wt_id, service=service)
         for wt in downed:  # free the RAM slot + drop proxy routes
             self._release_slot(wt.project, wt.name)
             if wt.id in report.failed:  # crash-looped past give-up — a consumable alert
@@ -421,9 +427,11 @@ class Daemon:
             else:
                 observability.log_event("gc", project=wt.project, worktree=wt.name)
 
-    def _sync_registry(self, report: TickReport) -> list:
-        """Off-loop: apply pid changes and mark down worktrees stopped. Returns the
-        downed worktree rows so the caller can free their slots without a second read."""
+    def _sync_registry(self, report: TickReport) -> tuple[list, dict[int, tuple[str, str]]]:
+        """Off-loop: apply pid changes, mark down worktrees stopped, and resolve the names of
+        restarted worktrees. Returns the downed worktree rows (so the caller can free their
+        slots without a second read) and a ``{wt_id: (project, name)}`` map — so restart events
+        can log the human name every other event uses, without a registry read on the event loop."""
         for wt_id, pids in report.changed_pids.items():
             with contextlib.suppress(Exception):
                 self.registry.clear_processes(wt_id)
@@ -441,7 +449,13 @@ class Daemon:
                 self.registry.set_worktree_status(wt_id, status)
             if wt is not None:
                 downed.append(wt)
-        return downed
+        restart_names: dict[int, tuple[str, str]] = {}
+        for wt_id in {wt_id for wt_id, _service in report.restarted}:
+            with contextlib.suppress(Exception):
+                wt = self.registry.get_worktree_by_id(wt_id)
+                if wt is not None:
+                    restart_names[wt_id] = (wt.project, wt.name)
+        return downed, restart_names
 
     async def _status(self, params: dict) -> dict:
         # read-only and thread-safe (connection-per-thread registry); no lock needed

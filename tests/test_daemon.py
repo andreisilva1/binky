@@ -222,6 +222,31 @@ def test_apply_report_keeps_registry_io_off_the_event_loop() -> None:
         d.registry.close()
 
 
+def test_restart_event_logs_the_worktree_name_not_just_its_id(monkeypatch) -> None:
+    """A supervisor auto-restart must log project+worktree *name* like every other event, so a
+    `grep <worktree> events.log` surfaces restarts — not a numeric id the user never sees (I10).
+    The name is resolved off the event loop, inside `_sync_registry`, to keep registry reads
+    off the loop."""
+    d = daemon.Daemon()
+    try:
+        wt = d.registry.create_worktree(
+            "proj", "alpha", "/tmp/alpha", "alpha", status=WorktreeStatus.ready
+        )
+        events: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            daemon.observability, "log_event", lambda name, **kw: events.append((name, kw))
+        )
+        report = TickReport(restarted=[(wt.id, "api")])
+
+        asyncio.run(d._apply_report(report))
+
+        restarts = [kw for name, kw in events if name == "restart"]
+        assert restarts == [{"project": "proj", "worktree": "alpha", "service": "api"}]
+        assert "worktree_id" not in restarts[0]  # keyed by name, like up/down/reload/gc
+    finally:
+        d.registry.close()
+
+
 def test_reachability_warnings_flag_a_dead_proxy() -> None:
     """`up` must not print a clean success when the proxy that serves its hostnames
     never bound. With routes present and a bind error recorded, a warning appears; with
