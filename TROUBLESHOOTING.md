@@ -92,6 +92,33 @@ satisfy — lower it.
 
 ---
 
+## Scripting
+
+### A command said it's "taking longer than Ns" and exited non-zero
+
+The daemon serializes operations on the *same* worktree, so a quick command (`down`, `remove`) fired
+while a slow one (`reload`, `up`) is still running on that worktree waits its turn. If the wait passes
+the client's timeout, the CLI stops waiting and prints:
+
+```
+… 'down' is taking longer than 5s — the daemon is still working on it. Check `binky status` in a moment.
+```
+
+This is **not** a failure — the daemon keeps working and the op converges; `binky status` shows where it
+landed. To make that distinguishable in a script, this case exits **75** (`EX_TEMPFAIL`), separate from
+the `1` a real error uses. Treat `75` as "pending — poll `binky status`", not "failed":
+
+```bash
+binky down "$wt"
+case $? in
+  0)  echo "stopped" ;;
+  75) until binky status . | grep -q "$wt.*stopped"; do sleep 1; done ;;  # queued; wait it out
+  *)  echo "down failed" >&2; exit 1 ;;
+esac
+```
+
+---
+
 ## URLs and the proxy
 
 ### `web.login-fix.acme.localhost` doesn't resolve

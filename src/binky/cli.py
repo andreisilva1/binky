@@ -28,6 +28,23 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+# EX_TEMPFAIL (sysexits.h): the request was accepted but hasn't finished — a script should retry
+# or poll, not treat it as a hard failure. We use it for the daemon-is-busy timeout below.
+EXIT_PENDING = 75
+
+
+def _rpc_fail(exc: ipc.RpcError) -> None:
+    """Render an RPC error and exit — but a `timeout` isn't a failure. The daemon is still working
+    the (serialized) op and it will converge; a command queued behind a slow op on the same worktree
+    hits this. So it exits `EXIT_PENDING` (75), which a caller can treat as "pending, poll status"
+    rather than "failed", and prints in the neutral colour rather than red."""
+    if exc.code == "timeout":
+        typer.secho(f"… {exc.message}", fg=typer.colors.YELLOW, err=True)
+        raise typer.Exit(code=EXIT_PENDING) from exc
+    typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
+    raise typer.Exit(code=1) from exc
+
+
 @app.callback()
 def main(
     _version: Annotated[
@@ -113,8 +130,7 @@ def up(
             timeout=120,
         )
     except ipc.RpcError as exc:
-        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+        _rpc_fail(exc)
     for svc in res["services"]:
         tail = f"  :{svc['port']}" if svc.get("port") else ""
         typer.echo(f"  {svc['service']}  pid {svc['pid']}{tail}")
@@ -143,8 +159,7 @@ def reload(
             timeout=120,
         )
     except ipc.RpcError as exc:
-        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+        _rpc_fail(exc)
     for svc in res["services"]:
         tail = f"  :{svc['port']}" if svc.get("port") else ""
         typer.echo(f"  {svc['service']}  pid {svc['pid']}{tail}")
@@ -166,8 +181,7 @@ def down(worktree: Annotated[str, typer.Argument(help="Worktree to stop.")]) -> 
     try:
         res = ipc.call("down", {"root": str(Path.cwd()), "worktree": worktree})
     except ipc.RpcError as exc:
-        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+        _rpc_fail(exc)
     typer.secho(f"✓ down: {worktree} ({res['stopped']} stopped)", fg=typer.colors.GREEN)
 
 
@@ -185,8 +199,7 @@ def remove(
     try:
         ipc.call("remove", {"root": str(Path.cwd()), "worktree": worktree, "force": force})
     except ipc.RpcError as exc:
-        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+        _rpc_fail(exc)
     typer.secho(f"✓ removed: {worktree}", fg=typer.colors.GREEN)
 
 
@@ -201,8 +214,7 @@ def verify(worktree: Annotated[str, typer.Argument(help="Worktree to verify.")])
     try:
         res = ipc.call("verify", {"root": str(Path.cwd()), "worktree": worktree}, timeout=600)
     except ipc.RpcError as exc:
-        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+        _rpc_fail(exc)
     for check in res["checks"]:
         mark = "✓" if check["passed"] else "✗"
         color = typer.colors.GREEN if check["passed"] else typer.colors.RED
@@ -228,8 +240,7 @@ def env(
     try:
         res = ipc.call("env", {"root": str(Path.cwd()), "worktree": worktree})
     except ipc.RpcError as exc:
-        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+        _rpc_fail(exc)
     coords = res["env"]
     if dotenv:
         for name, value in coords.items():
@@ -271,8 +282,7 @@ def curl(
     try:
         route = ipc.call("route", {"root": str(Path.cwd()), "worktree": worktree, "service": service})
     except ipc.RpcError as exc:
-        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+        _rpc_fail(exc)
 
     proxy_port = route.get("proxy_port") or 0
     if proxy_port <= 0:
@@ -475,8 +485,7 @@ def gc() -> None:
     try:
         res = ipc.call("gc", timeout=120)
     except ipc.RpcError as exc:
-        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+        _rpc_fail(exc)
     if not res["count"]:
         typer.secho("✓ nothing to collect", fg=typer.colors.GREEN)
         return
@@ -501,8 +510,7 @@ def _apply_settings(changes: dict, ok_message: str) -> dict:
     try:
         res = ipc.call("settings_set", changes)
     except ipc.RpcError as exc:
-        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+        _rpc_fail(exc)
     typer.secho(ok_message.format(**res), fg=typer.colors.GREEN)
     return res
 
