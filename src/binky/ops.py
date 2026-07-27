@@ -558,7 +558,11 @@ def up(reg: Registry, procman: ProcessManager, params: dict) -> dict:
         reused = [req for req in needed if req not in missing]
         for service, label in reused:
             port = ports[(service, label)]
-            if allocator.is_bound(port):
+            # Wait a short beat rather than checking once: on a reload the service we just
+            # stopped may still be closing its listening socket, so the port reads as bound
+            # for a moment even though it's rightfully ours. An outside process that truly
+            # took it stays bound past the window and still fails, with the same message.
+            if not allocator.wait_free(port):
                 raise RpcFault(
                     "port_taken",
                     f"port {port} (for '{service}') was Binky's, but another process took it "
