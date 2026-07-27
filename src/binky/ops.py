@@ -443,6 +443,17 @@ def _run_setup(svc, sname: str, project: str, worktree: str, cwd: str, env: dict
     marker.write_text(digest, encoding="utf-8")
 
 
+def _clear_setup_markers(project: str, worktree: str) -> None:
+    """Drop a worktree's ``setup``-done markers so a re-created worktree re-runs ``setup``.
+
+    The markers live *outside* the checkout (under ``~/.binky/setup/…``). Destroying a worktree
+    deletes its ``node_modules`` / venv along with the checkout, but the marker would survive —
+    so the next ``up`` of the same name skips ``npm install`` (etc.) against an empty tree, and
+    the service dies with a baffling 'command not found'. Clearing the markers keeps the
+    outside-the-checkout state symmetric with the checkout we just deleted."""
+    shutil.rmtree(paths.binky_home() / "setup" / project / worktree, ignore_errors=True)
+
+
 def _health_check(sname: str, svc, ports: dict, worktree: str, cwd: str):
     """A bound one-shot health probe for continuous supervision (no late-binding)."""
     return lambda: health.check_once(sname, svc, ports, worktree, cwd)
@@ -584,6 +595,10 @@ def _rollback(reg, procman, cfg, wt, root, created_worktree: bool) -> None:
                 git.remove_worktree(root, wt.path, force=True)
         with contextlib.suppress(Exception):
             reg.delete_worktree(wt.id)
+        # the checkout (and its node_modules/venv) is gone — drop the `setup`-done markers too,
+        # or a retry of this same `up` would skip `setup` and fail even more confusingly
+        with contextlib.suppress(Exception):
+            _clear_setup_markers(cfg.project.name, wt.name)
     else:
         with contextlib.suppress(Exception):
             reg.clear_processes(wt.id)
@@ -684,8 +699,10 @@ def remove(reg: Registry, procman: ProcessManager, params: dict) -> dict:
             raise RpcFault("git", str(exc)) from exc
     reg.release_ports(wt.id)
     reg.delete_worktree(wt.id)  # cascades to slices
-    # retention: a removed worktree keeps no logs around
+    # retention: a removed worktree keeps no logs around, and no stale `setup`-done markers
+    # (else re-creating the name would skip `npm install` against the node_modules we just deleted)
     shutil.rmtree(paths.logs_dir() / cfg.project.name / name, ignore_errors=True)
+    _clear_setup_markers(cfg.project.name, name)
     return {"project": cfg.project.name, "worktree": name, "removed": True}
 
 
