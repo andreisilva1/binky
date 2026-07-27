@@ -134,11 +134,20 @@ def test_up_refuses_a_reused_port_that_was_stolen(tmp_path: Path) -> None:
 
 
 def test_parallel_ups_distinct_worktrees(tmp_path: Path) -> None:
-    """Several worktrees brought up at once (concurrent RPCs) all succeed, with
-    distinct ports and no git/index races — the core "fifteen at once" promise."""
+    """Concurrent ups (up to what admission will admit at once) all succeed, with
+    distinct ports and no git/index races — the core "many at once" promise.
+
+    How many run at once is admission's ``capacity``, derived from the box's RAM/cores, so
+    we saturate *that* rather than hardcode a count a small CI runner can't admit. Beyond
+    capacity an up correctly *queues* until a slot frees — which never comes here (nothing
+    goes down), so a hardcoded 3 on a 2-core runner (capacity 2) leaves the third waiting out
+    its whole RPC timeout. Ask the daemon its capacity and launch min(capacity, 3): always
+    real concurrency (admission's floor is 2), never more than it can hold."""
     daemon.start(timeout=20)
+    capacity = ipc.call("metrics")["admission"]["capacity"]
     proj = _make_project(tmp_path)
-    names = ["a", "b", "c"]
+    names = ["a", "b", "c"][: min(capacity, 3)]
+    assert len(names) >= 2  # admission's floor is 2 — we always exercise genuine concurrency
 
     results: dict[str, dict] = {}
     errors: list[tuple[str, Exception]] = []
