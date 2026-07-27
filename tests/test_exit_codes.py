@@ -57,3 +57,23 @@ def test_timeout_on_a_long_command_also_exits_pending(daemon_up, monkeypatch) ->
     )
     result = runner.invoke(app, ["reload", "feat"])
     assert result.exit_code == EXIT_PENDING
+
+
+def test_down_and_remove_get_a_stop_sized_client_timeout(daemon_up, monkeypatch) -> None:
+    """A graceful stop (SIGTERM → drain → SIGKILL) can take several seconds per service, so
+    `down`/`remove` are lifecycle ops like up/reload — not quick queries. Left on the 5s default,
+    a perfectly normal stop that took ~6s would spuriously exit `EXIT_PENDING`; they must ask for
+    a budget generous enough to cover the bounded stop work (a real squatter/deadlock still
+    eventually reports pending, just not on every ordinary removal)."""
+    seen: dict[str, float] = {}
+
+    def _capture(method, params=None, *, timeout=5.0):
+        seen[method] = timeout
+        return {"stopped": 0, "worktree": (params or {}).get("worktree")}
+
+    monkeypatch.setattr(cli.ipc, "call", _capture)
+    assert runner.invoke(app, ["down", "feat"]).exit_code == 0
+    assert runner.invoke(app, ["remove", "feat", "--force"]).exit_code == 0
+    # comfortably above the ~15s worst-case daemon-side stop+teardown, and above the 5s default
+    assert seen["down"] >= 30
+    assert seen["remove"] >= 30

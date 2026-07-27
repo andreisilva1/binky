@@ -179,7 +179,10 @@ def down(worktree: Annotated[str, typer.Argument(help="Worktree to stop.")]) -> 
         typer.secho("daemon not running — nothing to stop", fg=typer.colors.YELLOW)
         return
     try:
-        res = ipc.call("down", {"root": str(Path.cwd()), "worktree": worktree})
+        # A graceful stop (SIGTERM, wait for the drain, SIGKILL only if it overstays) can take
+        # several seconds per service — so this is a lifecycle op like up/reload, not a quick
+        # query. The 5s default would spuriously report 'pending' on a perfectly normal stop.
+        res = ipc.call("down", {"root": str(Path.cwd()), "worktree": worktree}, timeout=30)
     except ipc.RpcError as exc:
         _rpc_fail(exc)
     typer.secho(f"✓ down: {worktree} ({res['stopped']} stopped)", fg=typer.colors.GREEN)
@@ -197,7 +200,14 @@ def remove(
         typer.secho("daemon not running — nothing to remove", fg=typer.colors.YELLOW)
         return
     try:
-        ipc.call("remove", {"root": str(Path.cwd()), "worktree": worktree, "force": force})
+        # remove does a graceful stop (up to a few seconds per service) then tears down the
+        # slice and the git worktree — a lifecycle op like up/reload, not a quick query. The 5s
+        # default would spuriously report 'pending' on a normal removal that simply took ~6s.
+        ipc.call(
+            "remove",
+            {"root": str(Path.cwd()), "worktree": worktree, "force": force},
+            timeout=30,
+        )
     except ipc.RpcError as exc:
         _rpc_fail(exc)
     typer.secho(f"✓ removed: {worktree}", fg=typer.colors.GREEN)
