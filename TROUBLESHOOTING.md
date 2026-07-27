@@ -101,7 +101,7 @@ while a slow one (`reload`, `up`) is still running on that worktree waits its tu
 the client's timeout, the CLI stops waiting and prints:
 
 ```
-… 'down' is taking longer than 5s — the daemon is still working on it. Check `binky status` in a moment.
+… 'down' is taking longer than 30s — the daemon is still working on it. Check `binky status` in a moment.
 ```
 
 This is **not** a failure — the daemon keeps working and the op converges; `binky status` shows where it
