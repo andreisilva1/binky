@@ -286,6 +286,21 @@ To run it with nothing installed, hand it to `uvx` instead — `claude mcp add b
 
 A single machine-global daemon sits between your worktrees and the machine:
 
+```mermaid
+flowchart TB
+    CLI["agents · CLI · MCP"] -->|"up · down · status"| D(("binky daemon<br/>machine-global"))
+
+    D --> ADM{"admission<br/>RAM · disk · max_parallel"}
+    ADM -.->|"no room → queue / suspend"| Q["waiting"]
+    ADM -->|"admit"| W["worktree<br/>git worktree per name"]
+    W --> P["ports<br/>whole map before start"]
+    P --> R["adapters<br/>isolated slice per worktree"]
+    R --> S["supervisor<br/>depends_on · health · logs"]
+    S --> X["proxy<br/>svc.worktree.domain → port"]
+
+    D -.->|"reads · writes"| ST[("~/.binky<br/>SQLite + settings")]
+```
+
 1. **Worktree** — creates/uses a git worktree per name.
 2. **Ports** — a global allocator assigns every process a port *before anything starts* and injects
    the whole map, so nothing collides (`${self.port}`, `${api.url}`, …).
