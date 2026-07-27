@@ -126,6 +126,38 @@ def up(
 
 
 @app.command()
+def reload(
+    worktree: Annotated[str, typer.Argument(help="Worktree/branch name to restart.")],
+    group: Annotated[str, typer.Option("--group", "-g", help="Only restart a service group.")] = "",
+) -> None:
+    """Restart a worktree in place — stop it, then bring it back up on the same ports and data.
+
+    A single atomic step under the worktree's lock, so nothing slips in between the stop and the
+    start. Use it to pick up a config or dependency change without re-cloning the data slice.
+    """
+    _daemon.ensure()
+    try:
+        res = ipc.call(
+            "reload",
+            {"root": str(Path.cwd()), "worktree": worktree, "group": group or None},
+            timeout=120,
+        )
+    except ipc.RpcError as exc:
+        typer.secho(f"✗ {exc.message}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    for svc in res["services"]:
+        tail = f"  :{svc['port']}" if svc.get("port") else ""
+        typer.echo(f"  {svc['service']}  pid {svc['pid']}{tail}")
+    for warning in res.get("warnings", []):
+        typer.secho(f"  ⚠ {warning}", fg=typer.colors.YELLOW)
+    typer.secho(
+        f"✓ reload: {res['worktree']} ({res.get('stopped', 0)} stopped, "
+        f"{len(res['services'])} up)",
+        fg=typer.colors.GREEN,
+    )
+
+
+@app.command()
 def down(worktree: Annotated[str, typer.Argument(help="Worktree to stop.")]) -> None:
     """Stop a worktree's processes (keeps its files and ports)."""
     if not _daemon.is_running():

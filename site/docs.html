@@ -409,6 +409,7 @@
             <tr><td><code>binky init [dir] [--force]</code></td><td>Write a starting <code>binky.toml</code> from <code>docker-compose.yml</code> + <code>.env</code>.</td></tr>
             <tr><td><code>binky check [path]</code></td><td>Validate a <code>binky.toml</code> and flag footguns.</td></tr>
             <tr><td><code>binky up &lt;name&gt; [--group g]</code></td><td>Create/use the worktree, allocate ports, provision resources, start services.</td></tr>
+            <tr><td><code>binky reload &lt;name&gt; [--group g]</code></td><td>Restart in place — stop, then bring back up on the same ports and data.</td></tr>
             <tr><td><code>binky down &lt;name&gt;</code></td><td>Stop the processes. Keeps files, ports and data.</td></tr>
             <tr><td><code>binky remove &lt;name&gt; [--force]</code></td><td>Destroy it — stop, drop its slices, remove its files.</td></tr>
             <tr><td><code>binky status [.]</code></td><td>List worktrees, grouped by project. <code>.</code> = this project only.</td></tr>

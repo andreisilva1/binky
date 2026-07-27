@@ -69,6 +69,7 @@ class Daemon:
         self.router.add("version", self._version)
         self.router.add("up", self._up)
         self.router.add("down", self._down)
+        self.router.add("reload", self._reload)
         self.router.add("remove", self._remove)
         self.router.add("status", self._status)
         self.router.add("verify", self._verify)
@@ -103,49 +104,74 @@ class Daemon:
 
     async def _up(self, params: dict) -> dict:
         async with self._wt_lock(params.get("root"), params.get("worktree")):
-            wants_https = False
-            with contextlib.suppress(Exception):  # apply the project's https preference
-                cfg = ops._load(params.get("root"))
-                wants_https = bool(cfg.project.https)
-                if wants_https:
-                    self._ensure_https()
-            # Refuse fast when the wait could never end (a resource floor with nothing
-            # running to free it) rather than hang until the caller's RPC times out.
-            refusal = self.admission.rejection()
-            if refusal is not None:
-                raise rpc.RpcFault("resource_exhausted", refusal)
-            token = await self.admission.acquire()  # FIFO — waits for capacity
-            try:
-                # off the event loop: wait_healthy / migrate must not block other requests
-                result = await asyncio.to_thread(ops.up, self.registry, self.procman, params)
-            except BaseException as exc:
-                self.admission.release(token)
-                # A worktree that's already up but lost its routes (a C3 adoption whose boot
-                # rebuild couldn't run) would otherwise stay unreachable and `up` would just
-                # refuse. Heal the routes before surfacing the error — the signal is unchanged.
-                if isinstance(exc, rpc.RpcFault) and exc.code == "already_up":
-                    self._repair_routes(params)
-                raise
-            key = (result["project"], result["worktree"])
-            self._slots[key] = token
-            self._up_params[key] = params  # remembered so a pressure-suspend can re-up it (C2)
-            self._routes_by_wt[key] = result.get("routes", {})
-            self._rebuild_routes()
-            warnings = self._reachability_warnings(result.get("routes"), wants_https)
-            if warnings:
-                result["warnings"] = warnings
-            observability.log_event(
-                "up", project=result["project"], worktree=result["worktree"],
-                services=len(result.get("services", [])),
-            )
-            return result
+            return await self._up_locked(params)
+
+    async def _up_locked(self, params: dict) -> dict:
+        """The body of `up`, assuming the worktree lock is already held — so `reload` can run
+        down+up under a single hold of the lock without re-entering it (asyncio.Lock isn't
+        reentrant, so `_reload` must not call `_up`/`_down`, which re-acquire it)."""
+        wants_https = False
+        with contextlib.suppress(Exception):  # apply the project's https preference
+            cfg = ops._load(params.get("root"))
+            wants_https = bool(cfg.project.https)
+            if wants_https:
+                self._ensure_https()
+        # Refuse fast when the wait could never end (a resource floor with nothing
+        # running to free it) rather than hang until the caller's RPC times out.
+        refusal = self.admission.rejection()
+        if refusal is not None:
+            raise rpc.RpcFault("resource_exhausted", refusal)
+        token = await self.admission.acquire()  # FIFO — waits for capacity
+        try:
+            # off the event loop: wait_healthy / migrate must not block other requests
+            result = await asyncio.to_thread(ops.up, self.registry, self.procman, params)
+        except BaseException as exc:
+            self.admission.release(token)
+            # A worktree that's already up but lost its routes (a C3 adoption whose boot
+            # rebuild couldn't run) would otherwise stay unreachable and `up` would just
+            # refuse. Heal the routes before surfacing the error — the signal is unchanged.
+            if isinstance(exc, rpc.RpcFault) and exc.code == "already_up":
+                self._repair_routes(params)
+            raise
+        key = (result["project"], result["worktree"])
+        self._slots[key] = token
+        self._up_params[key] = params  # remembered so a pressure-suspend can re-up it (C2)
+        self._routes_by_wt[key] = result.get("routes", {})
+        self._rebuild_routes()
+        warnings = self._reachability_warnings(result.get("routes"), wants_https)
+        if warnings:
+            result["warnings"] = warnings
+        observability.log_event(
+            "up", project=result["project"], worktree=result["worktree"],
+            services=len(result.get("services", [])),
+        )
+        return result
 
     async def _down(self, params: dict) -> dict:
         async with self._wt_lock(params.get("root"), params.get("worktree")):
-            result = await asyncio.to_thread(ops.down, self.registry, self.procman, params)
+            return await self._down_locked(params)
+
+    async def _down_locked(self, params: dict) -> dict:
+        """The body of `down`, assuming the worktree lock is already held."""
+        result = await asyncio.to_thread(ops.down, self.registry, self.procman, params)
         self._release_slot(result["project"], result["worktree"])
         observability.log_event("down", project=result["project"], worktree=result["worktree"])
         return result
+
+    async def _reload(self, params: dict) -> dict:
+        # down+up under a single hold of the worktree lock, so nothing interleaves between the
+        # stop and the start. Admission is unchanged net-net vs. a plain down then up: the slot
+        # is released on the way down and re-acquired on the way up — so a reload can queue if
+        # the machine is at capacity with others already waiting, same rule as `up`.
+        async with self._wt_lock(params.get("root"), params.get("worktree")):
+            down_res = await self._down_locked(params)
+            up_res = await self._up_locked(params)
+        up_res["stopped"] = down_res.get("stopped", 0)
+        observability.log_event(
+            "reload", project=up_res["project"], worktree=up_res["worktree"],
+            services=len(up_res.get("services", [])),
+        )
+        return up_res
 
     async def _remove(self, params: dict) -> dict:
         async with self._wt_lock(params.get("root"), params.get("worktree")):

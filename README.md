@@ -242,6 +242,7 @@ dependency-free one in 30 lines.
 | `binky init [dir] [--force]` | Write a starting `binky.toml` from `docker-compose.yml` + `.env` |
 | `binky check [path]` | Validate a `binky.toml` and flag footguns |
 | `binky up <name> [--group g]` | Create/use the branch's worktree, allocate ports, provision resources, start services |
+| `binky reload <name> [--group g]` | Restart in place — stop, then bring back up on the same ports and data |
 | `binky down <name>` | Stop the worktree's processes (keeps its files and ports) |
 | `binky remove <name> [--force]` | Destroy the worktree — stop, drop its slices, remove its files |
 | `binky status [.]` | List worktrees (grouped by project); `.` = current project only |
