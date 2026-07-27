@@ -347,8 +347,9 @@
           <code>restart</code> policy with exponential backoff and a give-up cap, so a service that
           is genuinely broken stops instead of spinning. Everything a service writes to stdout and
           stderr is captured per worktree and per service — <code>binky logs &lt;worktree&gt;</code>
-          — and a worktree's logs are deleted when you remove it. They are not rotated while it
-          runs, so a service that writes without restraint will grow its log until then;
+          — and a worktree's logs are deleted when you remove it. Each service's log rolls at 5 MiB,
+          keeping three generations, at the moment it <em>(re)starts</em>; a service that runs a long
+          time without restarting still grows its current log until then, and
           <code>binky doctor</code> flags a log directory past half a gigabyte.
         </p>
         <p>
@@ -357,9 +358,12 @@
           processes that are still running rather than orphaning or duplicating them.
         </p>
         <p>
-          New worktrees are admitted through a FIFO queue bounded by <code>max_parallel</code>
-          <em>and</em> real free RAM. Point twenty agents at a laptop and they queue, instead of
-          taking the machine into swap.
+          New worktrees are admitted through a FIFO queue bounded by <code>max_parallel</code>,
+          real free RAM (a percentage kept in reserve) <em>and</em> free disk (a fixed GB headroom).
+          Point twenty agents at a laptop and they queue, instead of taking the machine into swap.
+          If a running swarm later crosses the RAM reserve, the daemon <strong>suspends</strong> the
+          newest worktree to relieve pressure — a <code>suspended</code> status — and resumes it in
+          fairness order once room returns. Tune the reserves with <code>binky reserve</code>.
         </p>
       </section>
 
@@ -420,6 +424,10 @@
             <tr><td><code>binky dashboard</code></td><td>Live TUI over every worktree.</td></tr>
             <tr><td><code>binky doctor</code></td><td>Diagnose the install and daemon. Non-zero when something is wrong.</td></tr>
             <tr><td><code>binky metrics</code></td><td>Point-in-time daemon metrics as JSON.</td></tr>
+            <tr><td><code>binky gc</code></td><td>Sweep orphaned adapter slices a crash left half-provisioned.</td></tr>
+            <tr><td><code>binky config</code></td><td>Show the machine-global settings — RAM/disk reserves and proxy ports.</td></tr>
+            <tr><td><code>binky reserve [--ram %] [--disk gb]</code></td><td>Set how much RAM/disk Binky permanently keeps free.</td></tr>
+            <tr><td><code>binky port [--proxy p] [--https p]</code></td><td>Set the proxy and HTTPS ports.</td></tr>
             <tr><td><code>binky mcp</code></td><td>Run the MCP server.</td></tr>
             <tr><td><code>binky daemon start|stop|status</code></td><td>Manage the background daemon.</td></tr>
           </tbody>
