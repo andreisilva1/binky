@@ -259,7 +259,8 @@ def curl(
         str, typer.Option("-d", "--data", help="Request body (JSON content-type by default).")
     ] = "",
     header: Annotated[
-        list[str], typer.Option("-H", "--header", help="Extra 'Name: value' header (repeatable).")
+        list[str] | None,
+        typer.Option("-H", "--header", help="Extra 'Name: value' header (repeatable)."),
     ] = None,
     include: Annotated[
         bool, typer.Option("-i", "--include", help="Print the status line and response headers.")
@@ -280,7 +281,9 @@ def curl(
         typer.secho("daemon not running", fg=typer.colors.YELLOW)
         raise typer.Exit(code=1)
     try:
-        route = ipc.call("route", {"root": str(Path.cwd()), "worktree": worktree, "service": service})
+        route = ipc.call(
+            "route", {"root": str(Path.cwd()), "worktree": worktree, "service": service}
+        )
     except ipc.RpcError as exc:
         _rpc_fail(exc)
 
@@ -293,7 +296,11 @@ def curl(
     headers = {"Host": route["host"]}
     for raw_header in header or []:
         if ":" not in raw_header:
-            typer.secho(f"✗ bad header '{raw_header}' — expected 'Name: value'", fg=typer.colors.RED, err=True)
+            typer.secho(
+                f"✗ bad header '{raw_header}' — expected 'Name: value'",
+                fg=typer.colors.RED,
+                err=True,
+            )
             raise typer.Exit(code=1)
         key, value = raw_header.split(":", 1)
         headers[key.strip()] = value.strip()

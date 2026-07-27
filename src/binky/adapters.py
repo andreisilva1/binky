@@ -34,7 +34,6 @@ from urllib.parse import urlparse, urlunparse
 
 from binky.procs import NO_WINDOW
 
-
 # Bound every adapter's admin connect. libpq (and most drivers) default to an unbounded
 # wait, so a server that is down — or a socket that accepts the TCP handshake but never
 # speaks the protocol — would hang `up` indefinitely, stranding the worktree in

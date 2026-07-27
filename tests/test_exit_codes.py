@@ -18,7 +18,8 @@ runner = CliRunner()
 @pytest.fixture
 def daemon_up(monkeypatch):
     monkeypatch.setattr(cli._daemon, "is_running", lambda: True)
-    monkeypatch.setattr(cli._daemon, "ensure", lambda: None)  # `up`/`reload` call this, not is_running
+    # `up`/`reload` call ensure(), not is_running
+    monkeypatch.setattr(cli._daemon, "ensure", lambda: None)
 
 
 def _raise(exc):
@@ -48,7 +49,8 @@ def test_a_real_rpc_error_still_exits_one(daemon_up, monkeypatch) -> None:
 
 
 def test_timeout_on_a_long_command_also_exits_pending(daemon_up, monkeypatch) -> None:
-    """Not just `down` — the shared helper means any RPC command reports a busy daemon the same way."""
+    """Not just `down` — the shared helper means any RPC command reports a busy daemon
+    the same way."""
     monkeypatch.setattr(
         cli.ipc, "call",
         _raise(cli.ipc.RpcError("timeout", "'reload' is taking longer than 120s")),

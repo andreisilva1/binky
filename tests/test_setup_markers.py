@@ -31,7 +31,8 @@ def _make_project(tmp_path: Path, counter: Path, *, add_failing_service: bool = 
     proj = tmp_path / "proj"
     proj.mkdir()
     (proj / "setup.py").write_text(
-        f"from pathlib import Path\nPath(r{str(counter)!r}).open('a', encoding='utf-8').write('x')\n",
+        "from pathlib import Path\n"
+        f"Path(r{str(counter)!r}).open('a', encoding='utf-8').write('x')\n",
         encoding="utf-8",
     )
     (proj / "run.py").write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
