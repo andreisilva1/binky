@@ -103,6 +103,30 @@ def test_up_reuses_ports_after_down(tmp_path: Path) -> None:
     assert web_port2 == web_port  # ports are kept across down/up
 
 
+def _grab_port_when_free(port: int, timeout: float = 10.0) -> socket.socket:
+    """Bind and listen on `port`, retrying while a just-stopped Binky service still releases it.
+
+    `down` returns once the daemon considers the worktree stopped, but on Linux the child's
+    listening socket is torn down asynchronously a beat later — so an immediate bind here can
+    lose a race with Binky's own teardown and get Errno 98, even with SO_REUSEADDR (the port is
+    still in LISTEN, not TIME_WAIT). That race is exactly what up's wait_free window (1dcbbb9)
+    tolerates in production; the test just has to wait for the port to actually free before the
+    "stranger" grabs it. A port that never frees would be a real regression, so we still raise."""
+    deadline = time.monotonic() + timeout
+    while True:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind(("127.0.0.1", port))
+            s.listen(1)
+            return s
+        except OSError:
+            s.close()
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.1)
+
+
 def test_up_refuses_a_reused_port_that_was_stolen(tmp_path: Path) -> None:
     """C8: a port Binky reused was taken by an outside process while the worktree was down.
     `up` must fail loud and name the port, not hand the service a port it can't bind and let
@@ -115,10 +139,7 @@ def test_up_refuses_a_reused_port_that_was_stolen(tmp_path: Path) -> None:
     web_port = next(s["port"] for s in first["services"] if s["service"] == "web")
     ipc.call("down", {"root": str(proj), "worktree": "feat"})
 
-    thief = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    thief.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    thief.bind(("127.0.0.1", web_port))  # a stranger grabs the port while feat is down
-    thief.listen(1)
+    thief = _grab_port_when_free(web_port)  # a stranger grabs the port while feat is down
     try:
         with pytest.raises(ipc.RpcError, match="took it") as excinfo:
             ipc.call("up", {"root": str(proj), "worktree": "feat"}, timeout=30)
