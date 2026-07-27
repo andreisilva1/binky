@@ -35,6 +35,13 @@ from urllib.parse import urlparse, urlunparse
 from binky.procs import NO_WINDOW
 
 
+# Bound every adapter's admin connect. libpq (and most drivers) default to an unbounded
+# wait, so a server that is down — or a socket that accepts the TCP handshake but never
+# speaks the protocol — would hang `up` indefinitely, stranding the worktree in
+# `provisioning`. This ceiling turns that into a fast, clean AdapterError instead.
+CONNECT_TIMEOUT = 10  # seconds
+
+
 class AdapterError(Exception):
     """An adapter operation failed (bad config, driver missing, resource error)."""
 
@@ -214,7 +221,17 @@ class PostgresAdapter(Adapter):
             import psycopg
         except ImportError as exc:  # pragma: no cover — exercised only without the extra installed
             raise AdapterError("psycopg not installed — `pip install 'binky[postgres]'`") from exc
-        return psycopg.connect(self.admin_url, autocommit=True)
+        # Bound the connect (see CONNECT_TIMEOUT) unless the admin URL already sets one, and
+        # translate a connection failure into a clean AdapterError — otherwise a raw
+        # psycopg.OperationalError slips past `_provision_adapters`' `except AdapterError` and
+        # surfaces as an opaque error instead of "could not connect to postgres: …".
+        kwargs: dict = {"autocommit": True}
+        if "connect_timeout" not in self.admin_url:
+            kwargs["connect_timeout"] = CONNECT_TIMEOUT
+        try:
+            return psycopg.connect(self.admin_url, **kwargs)
+        except psycopg.OperationalError as exc:
+            raise AdapterError(f"could not connect to postgres: {exc}".strip()) from exc
 
     def provision(self, slice_name: str) -> None:
         with self._connect() as conn:

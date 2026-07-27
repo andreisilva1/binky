@@ -376,6 +376,53 @@ def test_external_adapter_surfaces_failure() -> None:
 PG_URL = os.environ.get("BINKY_TEST_PG")
 
 
+def _fake_psycopg(monkeypatch, *, connect):
+    """Install a stand-in `psycopg` module (module-level `import psycopg` inside `_connect`
+    picks it up) so the connect-bounding/error-wrapping can be tested without a real server."""
+    import types
+
+    mod = types.ModuleType("psycopg")
+    mod.OperationalError = type("OperationalError", (Exception,), {})
+    mod.connect = connect
+    monkeypatch.setitem(sys.modules, "psycopg", mod)
+    return mod
+
+
+def test_postgres_connect_bounds_the_wait_and_wraps_failure(monkeypatch) -> None:
+    """A down server must fail fast and clean: `_connect` injects a connect_timeout and turns a
+    driver OperationalError into an AdapterError that `_provision_adapters` can catch — otherwise
+    `up` waits unbounded on a dead DB, then leaks a raw psycopg error past `except AdapterError`."""
+    captured: dict = {}
+
+    def connect(url, **kwargs):
+        captured["url"], captured["kwargs"] = url, kwargs
+        raise sys.modules["psycopg"].OperationalError("connection refused")
+
+    _fake_psycopg(monkeypatch, connect=connect)
+    adapter = adapters.get("postgres", {"admin_url": "postgres://u@localhost/db"})
+    with pytest.raises(adapters.AdapterError) as excinfo:
+        adapter.provision("slice_x")
+    assert "could not connect to postgres" in str(excinfo.value)
+    assert captured["kwargs"].get("connect_timeout") == adapters.CONNECT_TIMEOUT
+
+
+def test_postgres_connect_respects_a_timeout_already_in_the_url(monkeypatch) -> None:
+    """If the admin URL already sets connect_timeout, `_connect` leaves it alone (no clobber)."""
+    captured: dict = {}
+
+    def connect(url, **kwargs):
+        captured["kwargs"] = kwargs
+        raise sys.modules["psycopg"].OperationalError("nope")
+
+    _fake_psycopg(monkeypatch, connect=connect)
+    adapter = adapters.get(
+        "postgres", {"admin_url": "postgres://u@localhost/db?connect_timeout=3"}
+    )
+    with pytest.raises(adapters.AdapterError):
+        adapter.provision("slice_x")
+    assert "connect_timeout" not in captured["kwargs"]  # the URL's own value wins
+
+
 @pytest.mark.skipif(not PG_URL, reason="set BINKY_TEST_PG to a Postgres admin URL to run")
 def test_postgres_adapter_roundtrip() -> None:
     adapter = adapters.get("postgres", {"admin_url": PG_URL})

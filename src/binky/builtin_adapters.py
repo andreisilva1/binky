@@ -41,7 +41,7 @@ import urllib.parse
 import urllib.request
 from typing import ClassVar
 
-from binky.adapters import Adapter, AdapterError, _with_dbname
+from binky.adapters import CONNECT_TIMEOUT, Adapter, AdapterError, _with_dbname
 from binky.procs import NO_WINDOW
 
 
@@ -276,6 +276,7 @@ class MySQLAdapter(Adapter):
                 user=urllib.parse.unquote(parts.username or "root"),
                 password=urllib.parse.unquote(parts.password or ""),
                 autocommit=True,
+                connect_timeout=CONNECT_TIMEOUT,  # never hang `up` on a down server
             )
         except Exception as exc:
             raise AdapterError(f"could not connect to mysql: {exc}") from exc

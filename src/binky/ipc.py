@@ -120,11 +120,21 @@ def call(method: str, params: dict | None = None, *, timeout: float = 5.0) -> di
         request = {"token": info.token, "method": method, "params": params or {}}
         sock.sendall((json.dumps(request) + "\n").encode())
         resp = _recv_line(sock)
+    except TimeoutError as exc:
+        # Connected, but no answer within `timeout`s — the daemon is *busy*, not gone (a long
+        # `up` still provisioning + health-checking, say). Route this through RpcError, which
+        # every CLI command already renders as a clean "✗ …" line, instead of DaemonNotRunning
+        # (which no command catches → a raw traceback for the user). The daemon-side call keeps
+        # running and converges on its own; `binky status` shows where it landed.
+        raise RpcError(
+            "timeout",
+            f"'{method}' is taking longer than {timeout:g}s — the daemon is still working "
+            f"on it. Check `binky status` in a moment.",
+        ) from exc
     except OSError as exc:
-        # a timeout or reset *after* connecting (the daemon died or stopped answering
-        # mid-call) is still "unreachable" — surface it as such, per this function's
-        # contract, instead of leaking a raw OSError past callers that only guard
-        # against DaemonNotRunning / RpcError.
+        # a reset *after* connecting (the daemon died mid-call) is still "unreachable" —
+        # surface it as such, per this function's contract, instead of leaking a raw OSError
+        # past callers that only guard against DaemonNotRunning / RpcError.
         raise DaemonNotRunning(str(exc)) from exc
     finally:
         sock.close()

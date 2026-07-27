@@ -1,9 +1,11 @@
 """ipc.call's failure contract.
 
 The docstring promises DaemonNotRunning when unreachable and RpcError on a bad
-response. A failure *after* connecting (timeout, reset mid-call) used to escape
-as a raw OSError, past every caller that only guards DaemonNotRunning / RpcError.
-These pin the contract with a fake socket, no real daemon.
+response. A failure *after* connecting used to escape as a raw OSError, past every
+caller that only guards DaemonNotRunning / RpcError. Now those split by cause: a
+*reset* mid-call (the daemon died) is DaemonNotRunning; a *read timeout* (the daemon
+is merely busy, e.g. a long `up`) is RpcError("timeout"), which every command already
+renders cleanly instead of dumping a raw traceback. These pin it with a fake socket.
 """
 
 import json
@@ -52,12 +54,31 @@ def test_send_failure_after_connect_is_daemon_not_running(monkeypatch) -> None:
     assert sock.closed  # socket still cleaned up
 
 
-def test_recv_timeout_mid_call_is_daemon_not_running(monkeypatch) -> None:
+def test_recv_timeout_mid_call_is_rpc_timeout(monkeypatch) -> None:
+    """A busy daemon (no answer within `timeout`) is a clean RpcError('timeout'), not a raw
+    traceback — the message names the method and points at `binky status`."""
+
     class _TimingOut(_FakeSock):
         def recv(self, _n: int) -> bytes:
             raise TimeoutError("timed out")
 
     sock = _connect_returns(monkeypatch, _TimingOut())
+    with pytest.raises(ipc.RpcError) as excinfo:
+        ipc.call("up", timeout=120)
+    assert excinfo.value.code == "timeout"
+    assert "up" in excinfo.value.message and "binky status" in excinfo.value.message
+    assert sock.closed
+
+
+def test_recv_reset_mid_call_is_daemon_not_running(monkeypatch) -> None:
+    """A connection *reset* on read (the daemon died mid-call) is still 'unreachable' — a
+    non-timeout OSError stays DaemonNotRunning, distinct from the busy-timeout case above."""
+
+    class _Reset(_FakeSock):
+        def recv(self, _n: int) -> bytes:
+            raise ConnectionResetError("reset")
+
+    sock = _connect_returns(monkeypatch, _Reset())
     with pytest.raises(ipc.DaemonNotRunning):
         ipc.call("ping")
     assert sock.closed
