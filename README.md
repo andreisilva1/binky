@@ -246,6 +246,7 @@ dependency-free one in 30 lines.
 | `binky remove <name> [--force]` | Destroy the worktree — stop, drop its slices, remove its files |
 | `binky status [.]` | List worktrees (grouped by project); `.` = current project only |
 | `binky env <name> [--dotenv]` | Print a worktree's exposed coordinates, for you or an agent |
+| `binky curl <name> <service> [path]` | Call a service through the proxy with the `Host` header filled in (`-X`/`-d`/`-H`/`-i`/`-f`) |
 | `binky verify <name>` | Run the project's `agents.verify` checks; exits non-zero on failure |
 | `binky logs <name>` | Print a worktree's captured service logs |
 | `binky gc` | Sweep orphaned adapter slices a crash left half-provisioned |

@@ -96,9 +96,19 @@ satisfy — lower it.
 
 ### `web.login-fix.acme.localhost` doesn't resolve
 
-`*.localhost` resolves to loopback on macOS and most Linux setups, and on Windows 10+. If yours
-doesn't, add the specific name to your hosts file, or skip the proxy and hit the port directly —
-`binky status` lists every service's port, and `binky env <worktree>` prints the addresses.
+Browsers (Chrome, Edge, Firefox) resolve `*.localhost` to loopback themselves, so the proxy
+hostnames just work *in a browser* on every platform. The OS resolver is less uniform: macOS and
+most Linux setups resolve `*.localhost` system-wide, but **Windows only resolves `localhost`
+itself** — an arbitrary `web.login-fix.acme.localhost` won't resolve for CLI tools like `curl` or a
+script's HTTP client, even on Windows 11.
+
+So from a terminal (especially on Windows), reach a service one of three ways:
+
+- **`binky curl <worktree> <service> <path>`** — Binky fills in the `Host` header and dials the
+  proxy for you, so the hostname never has to resolve. The least-friction option.
+- add the specific name to your hosts file (pointing at `127.0.0.1`), or
+- skip the proxy and hit the port directly — `binky status` lists every service's port, and
+  `binky env <worktree>` prints the addresses.
 
 ### HTTPS isn't working
 
