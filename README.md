@@ -283,6 +283,11 @@ To run it with nothing installed, hand it to `uvx` instead — `claude mcp add b
 "binky[all-adapters]" binky mcp`, or as a block, `"command": "uvx"`, `"args": ["--from",
 "binky[all-adapters]", "binky", "mcp"]`.
 
+For the tool list and an agent-oriented walkthrough, see [AGENTS.md](AGENTS.md).
+
+<!-- mcp-name: io.github.andreisilva1/binky -->
+
+
 ## How it works
 
 A single machine-global daemon sits between your worktrees and the machine:

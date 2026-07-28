@@ -1,0 +1,25 @@
+# Binky
+
+> One isolated local world per git worktree — its own ports, env, private database
+> slice, and URLs — so a swarm of coding agents runs in parallel on one machine without
+> anything colliding. A thin CLI over a single machine-global daemon that owns the port
+> allocator, the process supervisor, and an HTTPS proxy. Python 3.11+, Apache-2.0.
+
+## For agents
+
+- [Agent guide](AGENTS.md): when to use Binky, how to install the MCP server, and the five tools (`up`, `down`, `status`, `env`, `verify`).
+- MCP server: `binky mcp` speaks the Model Context Protocol over stdio. Install with `claude mcp add binky -- uvx --from "binky[mcp]" binky mcp`.
+
+## Docs
+
+- [README](README.md): the problem, install, quickstart, the `binky.toml` config format, the full command list, and how it works.
+- [Architecture](ARCHITECTURE.md): a map of the internals — daemon, allocator, supervisor, adapters, proxy, admission.
+- [Adapters](README.md#adapters): 16 backing-service names over 10 implementations (postgres, mysql, redis, mongodb, s3, kafka, rabbitmq, qdrant, clickhouse, elasticsearch), each carving an isolated slice per worktree.
+- [Security](SECURITY.md): threat model — Binky runs your commands as you, on your machine; it is a developer tool, not a multi-tenant sandbox.
+- [Troubleshooting](TROUBLESHOOTING.md): the failure cases that actually come up.
+
+## Examples
+
+- [examples/hello](examples/hello): the smallest possible project.
+- [examples/rag](examples/rag): vector search where each worktree gets its own embedded corpus.
+- [examples/adapters/filestore.py](examples/adapters/filestore.py): a complete external adapter in ~30 lines.

@@ -23,6 +23,7 @@ def test_tools_wrap_the_daemon_rpc(monkeypatch) -> None:
         return {"ok": True}
 
     monkeypatch.setattr(mcp.daemon, "ensure", lambda: None)
+    monkeypatch.setattr(mcp.daemon, "is_running", lambda: True)
     monkeypatch.setattr(mcp.ipc, "call", fake_call)
 
     mcp.up("feat", root="/proj")
@@ -36,6 +37,36 @@ def test_tools_wrap_the_daemon_rpc(monkeypatch) -> None:
 
     mcp.status()
     assert seen["method"] == "status"
+
+
+def test_status_without_daemon_is_empty_not_an_error(monkeypatch) -> None:
+    # A read-only snapshot: no daemon means nothing is up, which is a normal answer,
+    # not a transport failure the agent has to reason about.
+    monkeypatch.setattr(mcp.daemon, "is_running", lambda: False)
+    monkeypatch.setattr(mcp.ipc, "call", _forbidden_call)
+    assert mcp.status() == {"worktrees": []}
+
+
+def test_down_without_daemon_is_a_noop(monkeypatch) -> None:
+    # Idempotent pause: nothing to stop is success, not an error.
+    monkeypatch.setattr(mcp.daemon, "is_running", lambda: False)
+    monkeypatch.setattr(mcp.ipc, "call", _forbidden_call)
+    res = mcp.down("feat")
+    assert res["stopped"] == 0
+
+
+def test_env_and_verify_without_daemon_raise_an_actionable_error(monkeypatch) -> None:
+    # These need a live worktree; surface a clear "call up() first" instead of an
+    # opaque transport exception.
+    monkeypatch.setattr(mcp.daemon, "is_running", lambda: False)
+    monkeypatch.setattr(mcp.ipc, "call", _forbidden_call)
+    for verb in ("env", "verify"):
+        with pytest.raises(RuntimeError, match=r"up\('feat'\)"):
+            getattr(mcp, verb)("feat")
+
+
+def _forbidden_call(method, params=None, timeout=None):
+    raise AssertionError(f"ipc.call({method!r}) should not run without a daemon")
 
 
 @pytest.mark.skipif(_HAS_MCP, reason="mcp installed → build_server succeeds")

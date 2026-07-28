@@ -41,7 +41,7 @@ dev = [
   "ruff>=0.6",
 ]
 mcp = [
-  "mcp>=1.0",
+  "mcp>=1.2",  # FastMCP(instructions=...) lands in 1.2
 ]
 
 # One extra per adapter — installing Binky for Redis should not pull boto3.
