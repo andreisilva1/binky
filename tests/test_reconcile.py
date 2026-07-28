@@ -138,6 +138,25 @@ def _sleeper() -> subprocess.Popen:
     )
 
 
+def _tick_until_down(
+    procman: supervisor.ProcessManager, wt_id: int, timeout: float = 5.0
+) -> supervisor.TickReport:
+    """Tick until ``wt_id`` is reported down, the way the real supervisor loop would.
+
+    A single tick right after an *external* kill is racy on Windows: the test still
+    holds the victim's ``Popen`` handle, which keeps the just-killed pid readable for
+    a beat, so the first ``is_same_process`` check can still read it as alive. The
+    daemon ticks on an interval and catches the exit on a later pass — do the same
+    here instead of demanding the very first tick sees it.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        report = procman.tick(time.monotonic())
+        if wt_id in report.worktrees_down or time.monotonic() >= deadline:
+            return report
+        time.sleep(0.05)
+
+
 def test_reconcile_adopts_a_live_ready_worktree(tmp_path: Path) -> None:
     """C3: a restart that finds a `ready` worktree whose processes are still alive adopts
     them — they keep running, the worktree stays `ready`, and they're now supervised here
@@ -204,7 +223,7 @@ def test_a_dead_adopted_process_takes_its_worktree_down(tmp_path: Path) -> None:
 
         victim.kill()
         victim.wait(timeout=5)  # reap, so the identity reads as truly gone
-        report = procman.tick(time.monotonic())
+        report = _tick_until_down(procman, wt.id)
 
         assert wt.id in report.worktrees_down  # reclaimed
         assert wt.id not in report.failed  # a clean down, not a crash-loop give-up
