@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import sys
 from itertools import groupby
 from pathlib import Path
 from typing import Annotated
@@ -13,6 +14,23 @@ import typer
 from binky import __version__, init_cmd, ipc, paths, settings
 from binky import daemon as _daemon
 from binky.config import ConfigError, config_warnings, load_config
+
+
+def _force_utf8_output() -> None:
+    """Make stdout/stderr encode UTF-8 so the glyphs we print (✓ ✗ ⚠ — …) never crash.
+
+    When stdout is a real UTF-8 console this is a no-op, but the moment it is redirected,
+    piped, or captured on Windows, Python falls back to the locale codec (cp1252) and a
+    lone `secho("✓ …")` raises an uncaught UnicodeEncodeError — the command dies with a
+    traceback even though its work already succeeded. Pin UTF-8 with errors="replace" so a
+    genuinely non-UTF-8 console degrades a glyph to a placeholder instead of blowing up.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(Exception):
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
+_force_utf8_output()
 
 app = typer.Typer(
     name="binky",

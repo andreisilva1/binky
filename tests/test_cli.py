@@ -1,11 +1,40 @@
 """Smoke tests for the Binky CLI entrypoint."""
 
+import io
+import sys
+
 from typer.testing import CliRunner
 
-from binky import __version__
+from binky import __version__, cli
 from binky.cli import app
 
 runner = CliRunner()
+
+
+def test_force_utf8_output_survives_a_cp1252_stdout(monkeypatch) -> None:
+    """The CLI prints ✓/✗/⚠/— glyphs; on a redirected or non-UTF-8 Windows stdout Python
+    falls back to cp1252 and a lone secho would raise UnicodeEncodeError, killing a command
+    whose work already succeeded. _force_utf8_output must pin UTF-8 so the glyph writes cleanly.
+    """
+    raw = io.BytesIO()
+    stream = io.TextIOWrapper(raw, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", stream)
+    monkeypatch.setattr(sys, "stderr", stream)
+
+    # a cp1252 stream chokes on ✓ before the fix — prove that, then prove the fix clears it
+    try:
+        print("✓", file=stream)
+        stream.flush()
+        raise AssertionError("expected cp1252 stdout to reject the glyph before reconfigure")
+    except UnicodeEncodeError:
+        pass
+
+    cli._force_utf8_output()
+
+    assert stream.encoding.lower() == "utf-8"
+    print("✓ up — done …", file=stream)  # no UnicodeEncodeError
+    stream.flush()
+    assert "✓" in raw.getvalue().decode("utf-8")
 
 
 def test_version_flag() -> None:
