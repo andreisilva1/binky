@@ -77,5 +77,9 @@ def test_build_server_requires_extra() -> None:
 
 @pytest.mark.skipif(not _HAS_MCP, reason="mcp not installed")
 def test_build_server_registers_tools() -> None:
+    # Actually builds against the installed SDK — this is the one test that would
+    # have caught the FastMCP→MCPServer class move between mcp 1.x and 2.x. It only
+    # runs where the `mcp` extra is installed, so CI must install it to cover this.
     server = mcp.build_server()
     assert server is not None
+    assert "worktree" in (getattr(server, "instructions", "") or "")

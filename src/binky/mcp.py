@@ -140,13 +140,32 @@ def _require_up(worktree: str) -> None:
 TOOLS = (up, down, status, env, verify)
 
 
-def build_server():
-    """Build the FastMCP server with Binky's tools. Requires the ``mcp`` extra."""
+def _load_server_class():
+    """The high-level server class the ``mcp`` extra provides.
+
+    It is ``FastMCP`` (``mcp.server.fastmcp``) in the 1.x SDK and ``MCPServer``
+    (``mcp.server.mcpserver``) in 2.x. Both take ``(name, instructions=...)`` and
+    expose the same ``.tool(name=, description=)`` decorator and ``.run()``, so the
+    rest of :func:`build_server` is version-agnostic. Prefer the 2.x class; fall
+    back to 1.x; only if neither is importable is the extra genuinely missing.
+    """
+    try:
+        from mcp.server.mcpserver import MCPServer
+
+        return MCPServer
+    except ImportError:
+        pass
     try:
         from mcp.server.fastmcp import FastMCP
+
+        return FastMCP
     except ImportError as exc:
         raise RuntimeError("MCP support needs the extra: pip install 'binky[mcp]'") from exc
-    server = FastMCP("binky", instructions=_INSTRUCTIONS)
+
+
+def build_server():
+    """Build the MCP server with Binky's tools. Requires the ``mcp`` extra."""
+    server = _load_server_class()("binky", instructions=_INSTRUCTIONS)
     for fn in TOOLS:
         server.tool(name=fn.__name__, description=(fn.__doc__ or "").strip())(fn)
     return server
