@@ -9,7 +9,7 @@
 So a swarm of coding agents runs in parallel on one machine without anything colliding.
 
 [![CI](https://github.com/andreisilva1/binky/actions/workflows/ci.yml/badge.svg)](https://github.com/andreisilva1/binky/actions/workflows/ci.yml)
-[![PyPI](https://img.shields.io/pypi/v/binky.svg)](https://pypi.org/project/binky/)
+[![PyPI](https://img.shields.io/pypi/v/binky)](https://pypi.org/project/binky/)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 

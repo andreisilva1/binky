@@ -40,6 +40,13 @@ between minor versions.
   orphan its descendants.
 - Bind failures are surfaced by `up` and `doctor` instead of failing silently.
 
+## [0.1.2] - 2026-07-28
+
+### Fixed
+- PyPI version badge in the README: refreshed the shields.io URL so GitHub (which proxies and
+  caches badge images through Camo) and the PyPI project page render the current version instead
+  of a stale "package or version not found" / older release. Packaging-only; no code changes.
+
 ## [0.0.1] - 2026-07-25
 
 ### Added
@@ -52,4 +59,5 @@ between minor versions.
 - MCP server (`binky mcp`) exposing `up`, `down`, `status`, `env`, and `verify` to agents.
 
 [Unreleased]: https://github.com/andreisilva1/binky/compare/v0.0.1...HEAD
+[0.1.2]: https://pypi.org/project/binky/0.1.2/
 [0.0.1]: https://github.com/andreisilva1/binky/releases/tag/v0.0.1
