@@ -280,8 +280,9 @@ one everywhere, only the file differs:
 ```
 
 To run it with nothing installed, hand it to `uvx` instead — `claude mcp add binky -- uvx --from
-"binky[all-adapters]" binky mcp`, or as a block, `"command": "uvx"`, `"args": ["--from",
-"binky[all-adapters]", "binky", "mcp"]`.
+"binky[mcp]" binky mcp`, or as a block, `"command": "uvx"`, `"args": ["--from", "binky[mcp]",
+"binky", "mcp"]`. For a project whose worktrees provision adapter slices, add those extras too, e.g.
+`binky[mcp,postgres]` (or `binky[mcp,all-adapters]` for the whole matrix).
 
 For the tool list and an agent-oriented walkthrough, see [AGENTS.md](AGENTS.md).
 
