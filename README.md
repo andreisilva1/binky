@@ -284,6 +284,9 @@ To run it with nothing installed, hand it to `uvx` instead — `claude mcp add b
 "binky", "mcp"]`. For a project whose worktrees provision adapter slices, add those extras too, e.g.
 `binky[mcp,postgres]` (or `binky[mcp,all-adapters]` for the whole matrix).
 
+Binky is published in the [MCP Registry](https://registry.modelcontextprotocol.io) as
+`io.github.andreisilva1/binky`, so registry-aware clients can discover and install it from there.
+
 For the tool list and an agent-oriented walkthrough, see [AGENTS.md](AGENTS.md).
 
 <!-- mcp-name: io.github.andreisilva1/binky -->

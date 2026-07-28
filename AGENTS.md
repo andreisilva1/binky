@@ -33,6 +33,9 @@ Any MCP client takes the same stdio server as a config block:
 { "mcpServers": { "binky": { "command": "uvx", "args": ["--from", "binky[mcp]", "binky", "mcp"] } } }
 ```
 
+Binky is also in the [MCP Registry](https://registry.modelcontextprotocol.io) as
+`io.github.andreisilva1/binky`, for clients that resolve servers from it.
+
 ## The tools
 
 `binky mcp` exposes the same verbs the CLI calls, against the same machine-global daemon:
