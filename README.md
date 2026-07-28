@@ -13,7 +13,7 @@ So a swarm of coding agents runs in parallel on one machine without anything col
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](pyproject.toml)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
-[Quickstart](#quickstart) · [Adapters](#adapters) · [Commands](#commands) · [For agents](#for-agents) · [How it works](#how-it-works) · [Troubleshooting](TROUBLESHOOTING.md)
+[Docs](https://binky-dev.vercel.app/) · [Quickstart](#quickstart) · [Adapters](#adapters) · [Commands](#commands) · [For agents](#for-agents) · [How it works](#how-it-works) · [Troubleshooting](TROUBLESHOOTING.md)
 
 </div>
 
