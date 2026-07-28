@@ -12,6 +12,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from collections.abc import Callable
+from urllib.parse import parse_qs, urlsplit
+
+from binky.https import ONDEMAND_ASK_PATH
 
 Resolver = Callable[[str], "int | None"]  # hostname -> worktree port
 
@@ -23,6 +26,25 @@ def _host(header: bytes) -> str | None:
         if line.lower().startswith(b"host:"):
             return line[5:].strip().decode("latin1").split(":")[0]
     return None
+
+
+def _request_target(header: bytes) -> str:
+    """The path+query from the request line (``GET <target> HTTP/1.1``)."""
+    line = header.split(b"\r\n", 1)[0].decode("latin1")
+    parts = line.split(" ")
+    return parts[1] if len(parts) > 1 else ""
+
+
+def _ondemand_domain(target: str) -> str | None:
+    """If ``target`` is Caddy's on-demand ask, the ``domain`` it's asking about.
+
+    Caddy hits ``GET <ask-url>?domain=<sni>`` before issuing a cert for ``<sni>``;
+    returns the domain when this is that request, else ``None`` (a normal request)."""
+    split = urlsplit(target)
+    if split.path != ONDEMAND_ASK_PATH:
+        return None
+    domain = parse_qs(split.query).get("domain", [""])[0]
+    return domain or ""
 
 
 def _http_error(status: str, message: str) -> bytes:
@@ -61,6 +83,16 @@ class Proxy:
         try:
             header = await self._read_head(creader)
             if not header:
+                return
+            domain = _ondemand_domain(_request_target(header))
+            if domain is not None:
+                # Caddy asking whether to mint an on-demand cert for `domain`: authorize
+                # only names we actually route, so an attacker can't make Caddy issue for
+                # arbitrary SNIs. 200 = go ahead, anything else = refuse.
+                ok = bool(domain) and self._resolve(domain) is not None
+                status = "200 OK" if ok else "404 Not Found"
+                cwriter.write(_http_error(status, "ok" if ok else f"no route for {domain}"))
+                await cwriter.drain()
                 return
             host = _host(header)
             port = self._resolve(host) if host else None

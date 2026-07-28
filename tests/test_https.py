@@ -19,6 +19,25 @@ def test_render_caddyfile_default_and_custom_port() -> None:
     assert "https://:8443 {" in custom
 
 
+def test_render_caddyfile_enables_on_demand_tls() -> None:
+    # Worktree hostnames are minted at `up`, so their certs must be issued on demand;
+    # without `on_demand` Caddy has no cert for a dynamic SNI and aborts the handshake
+    # (the bug the fire test surfaced). The ask must point back at the proxy so only
+    # routable names get a cert — regression-lock both.
+    rendered = render_caddyfile(8080)
+    assert "on_demand" in rendered  # tls internal { on_demand }
+    assert f"ask http://127.0.0.1:8080{https.ONDEMAND_ASK_PATH}" in rendered
+
+
+def test_render_caddyfile_disables_upstream_keepalive() -> None:
+    # The proxy routes by Host on a connection's first request then raw-pumps. Caddy pools
+    # upstream connections by address, not Host, so reusing one across worktrees pins every
+    # later request to the first worktree's backend — cross-routing https traffic. Keepalive
+    # must be off so each request is a fresh connection the proxy routes on its own Host.
+    rendered = render_caddyfile(8080)
+    assert "keepalive off" in rendered
+
+
 def test_caddy_binary_env_override(monkeypatch) -> None:
     monkeypatch.setenv("BINKY_CADDY", "/opt/caddy")
     assert caddy_binary() == "/opt/caddy"

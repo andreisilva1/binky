@@ -6,14 +6,24 @@ for https, Binky puts **Caddy** in front of it to terminate TLS with a local CA
 used *if present on PATH*; if it isn't, https is skipped and http still works.
 
 The Caddyfile is a host-agnostic catch-all, so one Caddy covers every worktree's
-``*.*.<domain>`` name on demand without per-route config:
+``*.*.<domain>`` name **on demand** without per-route config. Worktree hostnames are
+dynamic (a new one every ``up``), so Caddy can't pre-issue their certs — it mints an
+internal cert the first time each name is dialled. On-demand issuance is gated by an
+``ask`` back to the proxy so Caddy only ever issues for a name the proxy actually
+routes (an unknown Host is refused, not silently minted — which also silences Caddy's
+"vulnerable to abuse" warning):
 
     {
         admin off
         auto_https disable_redirects
+        on_demand_tls {
+            ask http://127.0.0.1:<proxy_port>/__binky/ondemand
+        }
     }
     https:// {
-        tls internal
+        tls internal {
+            on_demand
+        }
         reverse_proxy 127.0.0.1:<proxy_port>
     }
 """
@@ -35,16 +45,40 @@ def caddy_binary() -> str | None:
     return os.environ.get("BINKY_CADDY") or shutil.which("caddy")
 
 
+#: Path Caddy hits (and the proxy answers) to authorize an on-demand cert. Keeping it
+#: here means proxy.py and the Caddyfile can't drift on the sentinel.
+ONDEMAND_ASK_PATH = "/__binky/ondemand"
+
+
 def render_caddyfile(proxy_port: int, https_port: int = 443) -> str:
     site = "https://" if https_port == 443 else f"https://:{https_port}"
+    # Worktree hostnames are minted at `up` time, so their certs can't be pre-provisioned:
+    # `tls internal { on_demand }` issues on first contact. `on_demand_tls.ask` gates that
+    # on the proxy — Caddy only issues for a name the proxy routes, so an unknown SNI is
+    # refused instead of silently minted (this is also what silences Caddy's abuse warning).
     return (
         "{\n"
         "\tadmin off\n"
         "\tauto_https disable_redirects\n"
+        "\ton_demand_tls {\n"
+        f"\t\task http://127.0.0.1:{proxy_port}{ONDEMAND_ASK_PATH}\n"
+        "\t}\n"
         "}\n\n"
         f"{site} {{\n"
-        "\ttls internal\n"
-        f"\treverse_proxy 127.0.0.1:{proxy_port}\n"
+        "\ttls internal {\n"
+        "\t\ton_demand\n"
+        "\t}\n"
+        f"\treverse_proxy 127.0.0.1:{proxy_port} {{\n"
+        # The proxy routes by Host on a connection's FIRST request, then raw-pumps bytes
+        # (so WS/SSE/streaming pass through). Caddy pools upstream connections by address,
+        # not by Host, so reusing one across worktrees would pin every later request to the
+        # first worktree's backend — cross-routing https traffic. Disable upstream keepalive
+        # so each request is a fresh connection the proxy routes on its own Host. (Local dev
+        # tool; the extra connect is cheap. WS upgrades keep their own dedicated connection.)
+        "\t\ttransport http {\n"
+        "\t\t\tkeepalive off\n"
+        "\t\t}\n"
+        "\t}\n"
         "}\n"
     )
 
