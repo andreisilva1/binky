@@ -29,7 +29,7 @@ The lifecycle the README describes maps onto these modules:
 | **Ports** | `allocator.py`, `resolve.py` | Assign every process a port *before anything starts* and build the full token map (`${self.port}`, `${api.url}`, …). |
 | **Resources** | `adapters.py`, `builtin_adapters.py`, `adapter_sdk.py` | Carve an isolated slice of a shared server per worktree; tear it down on remove. |
 | **Supervision** | `supervisor.py`, `health.py`, `procs.py` | Start services in `depends_on` order, wait for health, capture logs, restart per policy, reclaim dead worktrees. |
-| **Proxy** | `proxy.py`, `https.py` | Route `<service>.<worktree>.<domain>` to the right port (WebSockets/HMR included); optionally front with Caddy for TLS. |
+| **Proxy** | `proxy.py`, `https.py` | Route `<service>.<worktree>.<domain>` to the right port (WebSockets/HMR included); optionally front with Caddy for TLS, whose on-demand certs are gated by an `ask` the proxy answers so only a routable host is ever issued one. |
 | **Admission** | `admission.py` | A FIFO queue bounded by `max_parallel`, a live free-RAM reserve (percentage) and a live free-disk headroom (fixed GB); suspends the newest worktree under sustained RAM pressure and resumes it when room returns, so a swarm doesn't melt the box. |
 
 Supporting modules: `config.py` (the `binky.toml` model), `registry.py` + `paths.py`

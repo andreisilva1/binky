@@ -12,7 +12,15 @@ has to be reworked. Small, obvious fixes can go straight to a PR.
 
 ## Development setup
 
-Binky targets **Python 3.11+** and runs on macOS, Linux, and Windows.
+Binky targets **Python 3.11+** and is supported on **Linux and Windows** — the two platforms
+it's tested on for real.
+
+**macOS is out of scope for this release.** The maintainer can't exercise it end-to-end — the
+concurrent-swarm and HTTPS/TLS paths especially, since macOS terminates `tls internal` through the
+Keychain, which behaves differently from Linux and Windows — so rather than ship a port nobody has
+run for real, it's left out for now. The unit suite still runs on macOS in CI, so the door stays
+open: a macOS port that's genuinely tested end-to-end is a very welcome contribution. macOS may
+land in a future update — [open an issue](../../issues) to coordinate before a large PR.
 
 ```bash
 python -m venv .venv

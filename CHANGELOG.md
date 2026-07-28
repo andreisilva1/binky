@@ -27,6 +27,13 @@ between minor versions.
   processes are supervised for liveness and can be stopped, and regain restart/health on the next `up`.
 
 ### Fixed
+- HTTPS now completes the TLS handshake for a worktree's dynamically-minted hostname: Caddy
+  issues an on-demand `tls internal` certificate, gated by an `ask` back to the proxy so only a
+  name the proxy actually routes gets one. Previously https aborted the handshake for a freshly
+  created worktree host.
+- Concurrent worktrees no longer cross-route over HTTPS. Upstream keepalive from Caddy to the
+  proxy is disabled, so pooled connections from different hostnames can't be pinned onto one
+  worktree's backend — each request is routed on its own `Host`.
 - `up` refuses to reuse a port that an outside process grabbed while the worktree was down,
   reporting it instead of crash-looping the service.
 - `stop` escalates a SIGKILL to the whole process group, so a child that ignores SIGTERM can't

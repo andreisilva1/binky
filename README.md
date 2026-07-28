@@ -35,7 +35,8 @@ database, its own URLs — from the same committed config.
 
 ## Install
 
-Python 3.11+ and git. macOS, Linux and Windows (tested on all three in CI).
+Python 3.11+ and git, on **Linux or Windows** — the two platforms Binky is tested on for real.
+macOS isn't a supported target yet; a well-tested port would be a welcome [contribution](CONTRIBUTING.md).
 
 ```bash
 uv tool install binky          # or: pipx install binky

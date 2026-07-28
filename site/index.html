@@ -57,7 +57,7 @@
         </g>
       </svg>
 
-      <div class="eyebrow rise d2">Apache-2.0 · Python 3.11+ · macOS · Linux · Windows</div>
+      <div class="eyebrow rise d2">Apache-2.0 · Python 3.11+ · Linux · Windows</div>
 
       <h1 class="rise d2">One isolated world <span class="dim">per worktree.</span></h1>
 
@@ -141,7 +141,7 @@
     <div class="container">
       <div class="reveal">
         <div class="sec-label">How you use it</div>
-        <h2 class="sec-title">Fourteen verbs. Nothing to learn twice.</h2>
+        <h2 class="sec-title">Every verb you'll use, and nothing to learn twice.</h2>
         <p class="sec-lead">
           Commit <code>binky.toml</code> once. From then on every branch — yours or an agent's —
           gets a full stack with a single command, and gives it all back with another.
@@ -152,15 +152,23 @@
         <div class="cmd-item"><code>binky init</code><span>Write a starting <code>binky.toml</code> from your <code>docker-compose.yml</code>.</span></div>
         <div class="cmd-item"><code>binky check</code><span>Validate the config and flag footguns before anything runs.</span></div>
         <div class="cmd-item"><code>binky up &lt;wt&gt;</code><span>Create the worktree, allocate ports, provision the DB, start services.</span></div>
+        <div class="cmd-item"><code>binky reload &lt;wt&gt;</code><span>Restart in place — same ports, same data.</span></div>
         <div class="cmd-item"><code>binky down &lt;wt&gt;</code><span>Stop the processes, keep the files, ports and data.</span></div>
         <div class="cmd-item"><code>binky remove &lt;wt&gt;</code><span>Tear it all down — worktree, database, ports, logs.</span></div>
         <div class="cmd-item"><code>binky status</code><span>Every worktree on the machine, live: state, services, ports.</span></div>
         <div class="cmd-item"><code>binky env &lt;wt&gt;</code><span>Print the live coordinates as JSON or <code>.env</code>.</span></div>
+        <div class="cmd-item"><code>binky curl &lt;wt&gt; &lt;svc&gt;</code><span>Hit a service through the proxy with the <code>Host</code> header filled in.</span></div>
         <div class="cmd-item"><code>binky verify &lt;wt&gt;</code><span>Run the project's checks; records pass/fail on the worktree.</span></div>
         <div class="cmd-item"><code>binky logs &lt;wt&gt;</code><span>Captured stdout/stderr per service, kept until you remove the worktree.</span></div>
+        <div class="cmd-item"><code>binky metrics</code><span>Point-in-time daemon metrics as JSON.</span></div>
         <div class="cmd-item"><code>binky dashboard</code><span>Live TUI over the whole binky.</span></div>
         <div class="cmd-item"><code>binky doctor</code><span>Diagnose the install and daemon; non-zero when something's wrong.</span></div>
+        <div class="cmd-item"><code>binky gc</code><span>Sweep orphaned adapter slices a crash left half-provisioned.</span></div>
+        <div class="cmd-item"><code>binky config</code><span>Show the machine-global settings — RAM/disk reserves, proxy ports.</span></div>
+        <div class="cmd-item"><code>binky reserve</code><span>Set how much RAM and disk Binky permanently keeps free.</span></div>
+        <div class="cmd-item"><code>binky port</code><span>Set the proxy and HTTPS ports.</span></div>
         <div class="cmd-item"><code>binky mcp</code><span>Expose the same verbs as MCP tools, for agents.</span></div>
+        <div class="cmd-item"><code>binky daemon</code><span>Manage the background daemon: start, stop, status.</span></div>
       </div>
 
       <div class="grid3">
@@ -177,7 +185,7 @@
         <div class="feat reveal">
           <span class="k">FOR A TEAM</span>
           <h3>One file, every machine</h3>
-          <p>The stack definition lives in the repo. New hire clones, runs <code>binky up</code>, and is running in minutes — Linux, macOS or Windows.</p>
+          <p>The stack definition lives in the repo. New hire clones, runs <code>binky up</code>, and is running in minutes — Linux or Windows.</p>
         </div>
       </div>
     </div>
@@ -369,7 +377,7 @@
         <span class="chip">Elasticsearch</span>
         <span class="chip">OpenSearch</span>
       </div>
-      <p class="note">every one of these is tested against a real server in CI</p>
+      <p class="note">each backend family is tested against a real server in CI — protocol-compatible forks share one implementation</p>
     </div>
   </section>
 
