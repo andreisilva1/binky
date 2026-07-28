@@ -160,11 +160,11 @@
         <div class="cmd-item"><code>binky env &lt;wt&gt;</code><span>Print the live coordinates as JSON or <code>.env</code>.</span></div>
         <div class="cmd-item"><code>binky verify &lt;wt&gt;</code><span>Run the project's checks; records pass/fail on the worktree.</span></div>
         <div class="cmd-item"><code>binky logs &lt;wt&gt;</code><span>Captured stdout/stderr per service, kept until you remove the worktree.</span></div>
+        <div class="cmd-item"><code>binky dashboard</code><span>Live TUI over the whole binky.</span></div>
+        <div class="cmd-item"><code>binky doctor</code><span>Diagnose the install and daemon; non-zero when something's wrong.</span></div>
 
         <div class="cmd-group">Advanced <span>— debugging, agents &amp; machine settings</span></div>
         <div class="cmd-item"><code>binky curl &lt;wt&gt; &lt;svc&gt;</code><span>Hit a service through the proxy with the <code>Host</code> header filled in.</span></div>
-        <div class="cmd-item"><code>binky dashboard</code><span>Live TUI over the whole binky.</span></div>
-        <div class="cmd-item"><code>binky doctor</code><span>Diagnose the install and daemon; non-zero when something's wrong.</span></div>
         <div class="cmd-item"><code>binky metrics</code><span>Point-in-time daemon metrics as JSON.</span></div>
         <div class="cmd-item"><code>binky gc</code><span>Sweep orphaned adapter slices a crash left half-provisioned.</span></div>
         <div class="cmd-item"><code>binky config</code><span>Show the machine-global settings — RAM/disk reserves, proxy ports.</span></div>
