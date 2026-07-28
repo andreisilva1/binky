@@ -149,6 +149,7 @@
       </div>
 
       <div class="cmd-list reveal">
+        <div class="cmd-group">Everyday <span>— the worktree lifecycle, and what you check on it</span></div>
         <div class="cmd-item"><code>binky init</code><span>Write a starting <code>binky.toml</code> from your <code>docker-compose.yml</code>.</span></div>
         <div class="cmd-item"><code>binky check</code><span>Validate the config and flag footguns before anything runs.</span></div>
         <div class="cmd-item"><code>binky up &lt;wt&gt;</code><span>Create the worktree, allocate ports, provision the DB, start services.</span></div>
@@ -157,12 +158,14 @@
         <div class="cmd-item"><code>binky remove &lt;wt&gt;</code><span>Tear it all down — worktree, database, ports, logs.</span></div>
         <div class="cmd-item"><code>binky status</code><span>Every worktree on the machine, live: state, services, ports.</span></div>
         <div class="cmd-item"><code>binky env &lt;wt&gt;</code><span>Print the live coordinates as JSON or <code>.env</code>.</span></div>
-        <div class="cmd-item"><code>binky curl &lt;wt&gt; &lt;svc&gt;</code><span>Hit a service through the proxy with the <code>Host</code> header filled in.</span></div>
         <div class="cmd-item"><code>binky verify &lt;wt&gt;</code><span>Run the project's checks; records pass/fail on the worktree.</span></div>
         <div class="cmd-item"><code>binky logs &lt;wt&gt;</code><span>Captured stdout/stderr per service, kept until you remove the worktree.</span></div>
-        <div class="cmd-item"><code>binky metrics</code><span>Point-in-time daemon metrics as JSON.</span></div>
+
+        <div class="cmd-group">Advanced <span>— debugging, agents &amp; machine settings</span></div>
+        <div class="cmd-item"><code>binky curl &lt;wt&gt; &lt;svc&gt;</code><span>Hit a service through the proxy with the <code>Host</code> header filled in.</span></div>
         <div class="cmd-item"><code>binky dashboard</code><span>Live TUI over the whole binky.</span></div>
         <div class="cmd-item"><code>binky doctor</code><span>Diagnose the install and daemon; non-zero when something's wrong.</span></div>
+        <div class="cmd-item"><code>binky metrics</code><span>Point-in-time daemon metrics as JSON.</span></div>
         <div class="cmd-item"><code>binky gc</code><span>Sweep orphaned adapter slices a crash left half-provisioned.</span></div>
         <div class="cmd-item"><code>binky config</code><span>Show the machine-global settings — RAM/disk reserves, proxy ports.</span></div>
         <div class="cmd-item"><code>binky reserve</code><span>Set how much RAM and disk Binky permanently keeps free.</span></div>
