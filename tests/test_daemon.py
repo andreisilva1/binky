@@ -4,13 +4,14 @@ import asyncio
 import contextlib
 import os
 import stat
+import subprocess
 import threading
 import time
 from pathlib import Path
 
 import pytest
 
-from binky import daemon, ipc, paths, rpc, settings
+from binky import daemon, ipc, paths, procs, rpc, settings
 from binky.registry import WorktreeStatus
 from binky.supervisor import TickReport
 
@@ -95,6 +96,25 @@ def test_a_daemon_that_dies_on_startup_says_why() -> None:
     # and carried the daemon's own error back, not a bare "timed out"
     assert "unable to open database file" in message, message
     assert paths.daemon_log_path().exists()
+
+
+def test_windows_spawn_suppresses_the_console_window() -> None:
+    """The daemon must launch windowless on Windows.
+
+    It used to spawn with ``DETACHED_PROCESS``, which let Windows allocate the
+    console-subsystem daemon a fresh console — a blank ``cmd`` window that popped
+    up on the first `binky` call that started the daemon and lingered for its whole
+    life. ``CREATE_NO_WINDOW`` (``procs.NO_WINDOW``) gives it a hidden console
+    instead. Guard the flag choice so it can't regress back to a visible window.
+    """
+    kwargs = daemon._spawn_kwargs()
+    if os.name == "nt":
+        assert kwargs["creationflags"] == procs.NO_WINDOW
+        assert procs.NO_WINDOW == subprocess.CREATE_NO_WINDOW  # a real, non-zero flag here
+        assert kwargs["creationflags"] != subprocess.DETACHED_PROCESS
+    else:
+        # off Windows there is no console to suppress; detach via a new session
+        assert kwargs["start_new_session"] is True
 
 
 def test_start_ping_stop() -> None:

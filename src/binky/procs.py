@@ -1,6 +1,6 @@
 """Creation flags for the child processes the daemon spawns.
 
-The daemon itself runs detached with no console (see ``daemon.start``). On
+The daemon itself runs with its own hidden console (see ``daemon.start``). On
 Windows a console-subsystem child launched from a console-less parent gets a
 *new* console allocated for it — which flashes up on screen and vanishes, once
 per service start, health probe, git call, adapter probe, and taskkill. Passing

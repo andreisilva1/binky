@@ -20,7 +20,7 @@ import subprocess
 import sys
 import time
 
-from binky import admission, ipc, observability, ops, paths, proxy, rpc, settings
+from binky import admission, ipc, observability, ops, paths, procs, proxy, rpc, settings
 from binky.https import Caddy
 from binky.registry import Registry, WorktreeStatus
 from binky.supervisor import ProcessManager, TickReport
@@ -645,15 +645,31 @@ def _startup_failure(reason: str) -> str:
     return f"{reason}. Last output from {log}:\n{tail}"
 
 
+def _spawn_kwargs() -> dict:
+    """Popen kwargs that launch the daemon windowless and independent of the CLI.
+
+    On Windows the daemon is a console-subsystem process; ``DETACHED_PROCESS`` cut
+    it loose from the parent's console but left Windows free to allocate it a fresh
+    one, which popped up as a blank ``cmd`` window that stuck around for the whole
+    life of the daemon. ``CREATE_NO_WINDOW`` — the same flag every other child the
+    daemon spawns already uses (see :mod:`binky.procs`) — gives it its own *hidden*
+    console instead: no window, and still detached from the launching terminal, so
+    closing that terminal doesn't take the daemon down. Off Windows we start a new
+    session to detach it.
+    """
+    kwargs: dict = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
+    if os.name == "nt":
+        kwargs["creationflags"] = procs.NO_WINDOW
+    else:
+        kwargs["start_new_session"] = True
+    return kwargs
+
+
 def start(timeout: float = 10.0) -> None:
     """Spawn the daemon detached and wait until it is reachable. Idempotent."""
     if is_running():
         return
-    kwargs: dict = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
-    if os.name == "nt":
-        kwargs["creationflags"] = subprocess.DETACHED_PROCESS
-    else:
-        kwargs["start_new_session"] = True
+    kwargs = _spawn_kwargs()
 
     # The daemon outlives this process, so its stderr can't be a pipe — nobody
     # would be left to drain it. Sending it to DEVNULL was worse: it made a
