@@ -47,10 +47,10 @@ between minor versions.
   caches badge images through Camo) and the PyPI project page render the current version instead
   of a stale "package or version not found" / older release. Packaging-only; no code changes.
 
-## [0.0.1] - 2026-07-25
+## [0.1.1] - 2026-07-28
 
 ### Added
-- Initial alpha release: per-worktree isolation (ports, env, database slice, URLs), a
+- Initial published alpha release: per-worktree isolation (ports, env, database slice, URLs), a
   machine-global supervision daemon, a global port allocator, RAM-bounded FIFO admission,
   an embedded reverse proxy with optional Caddy HTTPS, and 16 adapter names across 10
   implementations.
@@ -58,6 +58,6 @@ between minor versions.
   `dashboard`, `doctor`, `metrics`, `mcp`, `daemon`).
 - MCP server (`binky mcp`) exposing `up`, `down`, `status`, `env`, and `verify` to agents.
 
-[Unreleased]: https://github.com/andreisilva1/binky/compare/v0.0.1...HEAD
+[Unreleased]: https://github.com/andreisilva1/binky/commits/main
 [0.1.2]: https://pypi.org/project/binky/0.1.2/
-[0.0.1]: https://github.com/andreisilva1/binky/releases/tag/v0.0.1
+[0.1.1]: https://pypi.org/project/binky/0.1.1/
